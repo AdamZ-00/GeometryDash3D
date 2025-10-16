@@ -4,25 +4,36 @@ using UnityEngine;
 public class ObstacleSpawner : MonoBehaviour
 {
     [Header("Références")]
+    [Tooltip("Sol/piste. Sert à lire la largeur pour adapter le spawn.")]
+    public Transform ground;                         // mets ton Ground ici (ou laisse vide si tu préfères xRange manuel)
+    public Transform parentForSpawned;               // optionnel : parent pour ranger les spawns
+
     public GameObject obstaclePrefab;
     public GameObject jumpPadPrefab;
     public GameObject platformPrefab;
 
-    [Header("Plage de spawn")]
-    public int numberOfElements = 50;
+    [Header("Z (avant/arrière)")]
+    public int   numberOfElements = 50;
     public float startZ = 15f;
     public float endZ   = 300f;
 
-    // X aléatoire (ou lanes, voir option plus bas)
+    [Header("X (gauche/droite)")]
+    [Tooltip("Laisser vide -> auto depuis le Ground. Sinon utilisé en fallback.")]
     public Vector2 xRange = new Vector2(-2f, 2f);
 
-    [Header("Espacement / anti-chevauchement")]
-    public float minSpacingZ = 2f;   // progression mini en Z entre deux essais
-    public float maxSpacingZ = 10f;  // progression maxi en Z
-    public float margin = 0.15f;     // marge d’air entre footprints
+    [Tooltip("Marge depuis les bords de la piste")]
+    public float edgePadding = 0.4f;
 
-    // "Taille au sol" de chaque type (largeur en X, longueur en Z)
-    // Ajuste en fonction de tes prefabs
+    [Header("Lanes (optionnel)")]
+    public bool  useLanes = true;
+    [Range(2, 7)] public int laneCount = 3;          // nb de voies si useLanes = true
+
+    [Header("Espacement / anti-chevauchement")]
+    public float minSpacingZ = 2f;
+    public float maxSpacingZ = 10f;
+    public float margin      = 0.15f;                 // marge d’air entre footprints
+
+    [Header("Taille au sol (X,Z)")]
     public Vector2 obstacleSize = new Vector2(1.0f, 1.0f);
     public Vector2 padSize      = new Vector2(1.2f, 1.0f);
     public Vector2 platformSize = new Vector2(2.0f, 2.0f);
@@ -32,22 +43,46 @@ public class ObstacleSpawner : MonoBehaviour
     public float padY       = 0.10f;
     public float platformY  = 1.5f;
 
-    [Header("Options")]
+    [Header("Essais")]
+    [Tooltip("Nb max d'essais pour placer un élément sans chevauchement.")]
     public int maxAttemptsPerElement = 20;
-    public bool snapToLanes = false;
-    public float[] lanesX = new float[] { -2f, 0f, 2f }; // utilisé si snapToLanes = true
 
     // --- interne ---
     struct Footprint
     {
-        public Vector2 centerXZ;  // (x,z)
-        public Vector2 halfSize;  // demi-largeur (x) / demi-longueur (z)
-        public int type;          // 0=obstacle, 1=pad, 2=plateforme (si tu veux des règles spécifiques)
+        public Vector2 centerXZ;   // (x,z)
+        public Vector2 halfSize;   // demi largeur/longueur
+        public int type;           // 0=obstacle, 1=pad, 2=plateforme
     }
-    private List<Footprint> placed = new List<Footprint>();
+    private readonly List<Footprint> placed = new();
+
+    // lanes calculées dynamiquement si useLanes = true
+    private float[] lanesX;
 
     void Start()
     {
+        // Nettoie un éventuel ancien spawn (pratique en Play/Stop)
+        if (parentForSpawned != null)
+        {
+            for (int i = parentForSpawned.childCount - 1; i >= 0; i--)
+                Destroy(parentForSpawned.GetChild(i).gameObject);
+        }
+        placed.Clear();
+
+        // 1) Détermine la plage X en lisant la largeur du Ground (si fournie)
+        Vector2 usableX = xRange;
+        if (ground != null)
+        {
+            // On suppose une piste centrée en X=0 : largeur ≈ scale.x
+            float half = ground.localScale.x * 0.5f;
+            usableX = new Vector2(-half + edgePadding, half - edgePadding);
+        }
+
+        // 2) Construit les lanes si demandé
+        if (useLanes)
+            lanesX = BuildLanes(usableX, laneCount);
+
+        // 3) Spawn
         float currentZ = startZ;
 
         for (int i = 0; i < numberOfElements; i++)
@@ -59,70 +94,79 @@ public class ObstacleSpawner : MonoBehaviour
             {
                 attempts++;
 
-                // Avance le Z un peu à chaque essai pour éviter de rester bloqué
+                // avance en Z
                 currentZ += Random.Range(minSpacingZ, maxSpacingZ);
                 if (currentZ > endZ) return;
 
-                float x = snapToLanes ? lanesX[Random.Range(0, lanesX.Length)]
-                                      : Random.Range(xRange.x, xRange.y);
+                // choisi X
+                float x = useLanes
+                    ? lanesX[Random.Range(0, lanesX.Length)]
+                    : Random.Range(usableX.x, usableX.y);
 
-                // 0 = obstacle, 1 = jump pad, 2 = plateforme
+                // choisi type + taille + Y
                 int type = Random.Range(0, 3);
-                GameObject prefab = obstaclePrefab;
+                GameObject prefab;
                 Vector2 half;
                 float y;
 
                 if (type == 1 && jumpPadPrefab != null)
                 {
-                    prefab = jumpPadPrefab;
-                    half = padSize * 0.5f;
-                    y = padY;
+                    prefab = jumpPadPrefab; half = padSize * 0.5f; y = padY;
                 }
                 else if (type == 2 && platformPrefab != null)
                 {
-                    prefab = platformPrefab;
-                    half = platformSize * 0.5f;
-                    y = platformY;
+                    prefab = platformPrefab; half = platformSize * 0.5f; y = platformY;
                 }
                 else
                 {
-                    prefab = obstaclePrefab;
-                    half = obstacleSize * 0.5f;
-                    y = obstacleY;
-                    type = 0;
+                    prefab = obstaclePrefab; half = obstacleSize * 0.5f; y = obstacleY; type = 0;
                 }
 
-                Footprint candidate = new Footprint
+                var candidate = new Footprint
                 {
                     centerXZ = new Vector2(x, currentZ),
                     halfSize = half,
-                    type = type
+                    type     = type
                 };
 
                 if (!OverlapsAnything(candidate, margin))
                 {
-                    // Pas de chevauchement : on instancie
+                    // instancie
                     Vector3 pos = new Vector3(x, y, currentZ);
-                    Instantiate(prefab, pos, Quaternion.identity);
+                    var go = Instantiate(prefab, pos, Quaternion.identity);
+                    if (parentForSpawned) go.transform.SetParent(parentForSpawned, true);
+
                     placed.Add(candidate);
                     placedOk = true;
                 }
-                // sinon : on boucle, on retente avec un nouveau Z/X
+                // sinon : retente avec un autre Z/X
             }
         }
+    }
+
+    // Construit des lanes également espacées entre usableX.x et usableX.y
+    float[] BuildLanes(Vector2 usableX, int count)
+    {
+        count = Mathf.Max(2, count);
+        float[] lanes = new float[count];
+        float span = usableX.y - usableX.x;
+
+        for (int i = 0; i < count; i++)
+        {
+            float t = (count == 1) ? 0.5f : (i / (float)(count - 1));   // 0..1
+            lanes[i] = usableX.x + t * span;
+        }
+        return lanes;
     }
 
     bool OverlapsAnything(Footprint a, float pad)
     {
         for (int i = 0; i < placed.Count; i++)
-        {
-            if (RectOverlap(a, placed[i], pad))
-                return true;
-        }
+            if (RectOverlap(a, placed[i], pad)) return true;
         return false;
     }
 
-    // Test d’intersection de deux rectangles axis-aligned sur X/Z
+    // test intersection rectangles axis-aligned (X/Z)
     bool RectOverlap(Footprint a, Footprint b, float pad)
     {
         float dx = Mathf.Abs(a.centerXZ.x - b.centerXZ.x);

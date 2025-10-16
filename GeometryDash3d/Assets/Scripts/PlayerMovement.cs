@@ -3,6 +3,9 @@ using UnityEngine;
 [RequireComponent(typeof(Rigidbody))]
 public class PlayerController : MonoBehaviour
 {
+
+    private LevelManagerLogic level;
+
     [Header("Vitesses")]
     public float forwardSpeed = 8f;
     public float strafeSpeed = 6f;
@@ -38,10 +41,13 @@ public class PlayerController : MonoBehaviour
         spawnPoint = transform.position;
         rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
         rb.interpolation = RigidbodyInterpolation.Interpolate;
+        level = FindObjectOfType<LevelManagerLogic>();
     }
 
     void Update()
     {
+        if (level != null && level.IsLevelFinished) return;
+        
         // saut si au sol
         if (Input.GetButtonDown("Jump") && IsGrounded())
         {
@@ -64,6 +70,8 @@ public class PlayerController : MonoBehaviour
 
     void FixedUpdate()
     {
+        if (level != null && level.IsLevelFinished) return;
+        
         // déplacement
         float h = Input.GetAxisRaw("Horizontal");
         Vector3 v = rb.linearVelocity;
@@ -94,16 +102,18 @@ public class PlayerController : MonoBehaviour
 
     public void Respawn()
     {
+        // coupe toute vitesse
         rb.linearVelocity = Vector3.zero;
         rb.angularVelocity = Vector3.zero;
+
+        // remet à la position de départ
         transform.position = spawnPoint;
 
-        // réaligne le cube
-        Vector3 e = transform.eulerAngles;
-        e.x = Mathf.Round(e.x / 90f) * 90f;
-        transform.rotation = Quaternion.Euler(e);
-        isFlipping = false;
+        // optionnel : remettre l’orientation/états
+        // transform.rotation = Quaternion.identity;
+        // isFlipping = false;
     }
+
 
     private void OnCollisionEnter(Collision other)
     {
