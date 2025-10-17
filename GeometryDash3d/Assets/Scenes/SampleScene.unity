@@ -1506,6 +1506,8 @@ MonoBehaviour:
   obstaclePrefab: {fileID: 2492209206826058993, guid: 3e7457fecd4690d4699f527346d53382, type: 3}
   jumpPadPrefab: {fileID: 933860015298836382, guid: e904d71613c5a5341bbf47e12ae67f53, type: 3}
   platformPrefab: {fileID: 1188526086085248291, guid: cc3ea82cccc15f343a000b037c80e326, type: 3}
+  tinyObstaclePrefab: {fileID: 2492209206826058993, guid: 937c0519cdd5b5c4aae8d1692584b118, type: 3}
+  tinyChance: 0.4
   numberOfElements: 50
   startZ: 15
   endZ: 300
@@ -1520,9 +1522,12 @@ MonoBehaviour:
   padSize: {x: 1.2, y: 1}
   platformSize: {x: 2, y: 2}
   obstacleY: 0.25
-  padY: 0.1
+  padY: 0.3
   platformY: 1.5
   maxAttemptsPerElement: 20
+  padChance: 0.33
+  platformChance: 0.33
+  forcePadEveryN: 0
 --- !u!4 &2118113117
 Transform:
   m_ObjectHideFlags: 0

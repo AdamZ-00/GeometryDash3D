@@ -12,6 +12,11 @@ public class ObstacleSpawner : MonoBehaviour
     public GameObject jumpPadPrefab;
     public GameObject platformPrefab;
 
+    [Tooltip("Obstacle plus petit (tiny). Laisser vide si non utilisé.")]
+    public GameObject tinyObstaclePrefab;
+    [Range(0f, 1f)] public float tinyChance = 0.5f;
+
+
     [Header("Z (avant/arrière)")]
     public int   numberOfElements = 50;
     public float startZ = 15f;
@@ -31,7 +36,7 @@ public class ObstacleSpawner : MonoBehaviour
     [Header("Espacement / anti-chevauchement")]
     public float minSpacingZ = 2f;
     public float maxSpacingZ = 10f;
-    public float margin      = 0.15f;                 // marge d’air entre footprints
+    public float margin      = 0.15f;                // marge d’air entre footprints
 
     [Header("Taille au sol (X,Z)")]
     public Vector2 obstacleSize = new Vector2(1.0f, 1.0f);
@@ -47,6 +52,14 @@ public class ObstacleSpawner : MonoBehaviour
     [Tooltip("Nb max d'essais pour placer un élément sans chevauchement.")]
     public int maxAttemptsPerElement = 20;
 
+    [Header("Probabilités")]
+    [Range(0f, 1f)] public float padChance = 0.33f;        // probabilité brute pad
+    [Range(0f, 1f)] public float platformChance = 0.33f;   // probabilité brute plateforme (le reste = obstacles)
+
+    [Header("Contraintes minimales")]
+    [Tooltip("Force au moins un JumpPad tous les N éléments (0 = désactivé).")]
+    public int forcePadEveryN = 0;
+
     // --- interne ---
     struct Footprint
     {
@@ -54,26 +67,34 @@ public class ObstacleSpawner : MonoBehaviour
         public Vector2 halfSize;   // demi largeur/longueur
         public int type;           // 0=obstacle, 1=pad, 2=plateforme
     }
-    private readonly List<Footprint> placed = new();
 
-    // lanes calculées dynamiquement si useLanes = true
+    private readonly List<Footprint> placed = new List<Footprint>();
     private float[] lanesX;
+
+    // Compteurs debug
+    private int _countObs, _countPads, _countPlatforms;
 
     void Start()
     {
-        // Nettoie un éventuel ancien spawn (pratique en Play/Stop)
+        // Nettoyage éventuels anciens spawns (pratique en Play/Stop)
         if (parentForSpawned != null)
         {
             for (int i = parentForSpawned.childCount - 1; i >= 0; i--)
                 Destroy(parentForSpawned.GetChild(i).gameObject);
         }
         placed.Clear();
+        _countObs = _countPads = _countPlatforms = 0;
+
+        // Warnings si prefabs non assignés
+        if (jumpPadPrefab == null) Debug.LogWarning("[ObstacleSpawner] jumpPadPrefab n'est pas assigné !");
+        if (platformPrefab == null) Debug.LogWarning("[ObstacleSpawner] platformPrefab n'est pas assigné !");
+        if (obstaclePrefab == null) Debug.LogError("[ObstacleSpawner] obstaclePrefab est manquant !");
 
         // 1) Détermine la plage X en lisant la largeur du Ground (si fournie)
         Vector2 usableX = xRange;
         if (ground != null)
         {
-            // On suppose une piste centrée en X=0 : largeur ≈ scale.x
+            // Hypothèse : piste centrée en X=0, largeur ≈ scale.x
             float half = ground.localScale.x * 0.5f;
             usableX = new Vector2(-half + edgePadding, half - edgePadding);
         }
@@ -81,6 +102,8 @@ public class ObstacleSpawner : MonoBehaviour
         // 2) Construit les lanes si demandé
         if (useLanes)
             lanesX = BuildLanes(usableX, laneCount);
+        else
+            lanesX = null;
 
         // 3) Spawn
         float currentZ = startZ;
@@ -96,7 +119,12 @@ public class ObstacleSpawner : MonoBehaviour
 
                 // avance en Z
                 currentZ += Random.Range(minSpacingZ, maxSpacingZ);
-                if (currentZ > endZ) return;
+                if (currentZ > endZ)
+                {
+                    // Fin de piste
+                    Debug.Log($"[ObstacleSpawner] Piste terminée à Z={currentZ:F2}. Spawns -> Obstacles: {_countObs}, Pads: {_countPads}, Plateformes: {_countPlatforms}");
+                    return;
+                }
 
                 // choisi X
                 float x = useLanes
@@ -104,7 +132,12 @@ public class ObstacleSpawner : MonoBehaviour
                     : Random.Range(usableX.x, usableX.y);
 
                 // choisi type + taille + Y
-                int type = Random.Range(0, 3);
+                int type = PickTypeNormalized();
+
+                // Option de forçage d'un pad
+                if (forcePadEveryN > 0 && (i + 1) % forcePadEveryN == 0)
+                    type = 1; // pad
+
                 GameObject prefab;
                 Vector2 half;
                 float y;
@@ -119,8 +152,15 @@ public class ObstacleSpawner : MonoBehaviour
                 }
                 else
                 {
-                    prefab = obstaclePrefab; half = obstacleSize * 0.5f; y = obstacleY; type = 0;
+                    // 50% de chance de tiny si dispo
+                    if (tinyObstaclePrefab != null && Random.value < tinyChance)
+                        prefab = tinyObstaclePrefab;
+                    else
+                        prefab = obstaclePrefab;
+
+                        half = obstacleSize * 0.5f; y = obstacleY; type = 0;
                 }
+
 
                 var candidate = new Footprint
                 {
@@ -137,11 +177,35 @@ public class ObstacleSpawner : MonoBehaviour
                     if (parentForSpawned) go.transform.SetParent(parentForSpawned, true);
 
                     placed.Add(candidate);
+
+                    // compteurs
+                    if (type == 1) _countPads++;
+                    else if (type == 2) _countPlatforms++;
+                    else _countObs++;
+
                     placedOk = true;
                 }
                 // sinon : retente avec un autre Z/X
             }
         }
+
+        Debug.Log($"[ObstacleSpawner] Spawns -> Obstacles: {_countObs}, Pads: {_countPads}, Plateformes: {_countPlatforms}");
+    }
+
+    /// <summary>
+    /// Retourne 0=obstacle, 1=pad, 2=plateforme, avec normalisation des chances.
+    /// Si padChance + platformChance > 1, on tronque à 1. Le reste = obstacles.
+    /// </summary>
+    int PickTypeNormalized()
+    {
+        float pPad = Mathf.Clamp01(padChance);
+        float pPlat = Mathf.Clamp01(platformChance);
+        float total = Mathf.Min(1f, pPad + pPlat);
+
+        float r = Random.value;
+        if (r < pPad) return 1; // pad
+        else if (r < total) return 2; // plateforme
+        return 0; // obstacle
     }
 
     // Construit des lanes également espacées entre usableX.x et usableX.y
@@ -176,5 +240,37 @@ public class ObstacleSpawner : MonoBehaviour
         float allowZ = a.halfSize.y + b.halfSize.y + pad;
 
         return (dx < allowX) && (dz < allowZ);
+    }
+
+#if UNITY_EDITOR
+    [ContextMenu("DEBUG/Spawn 1 JumpPad ici")]
+    void DebugSpawnOnePad()
+    {
+        if (jumpPadPrefab == null) { Debug.LogWarning("[ObstacleSpawner] Aucun jumpPadPrefab assigné."); return; }
+
+        // X = voie centrale si lanes dispo, sinon 0
+        float x;
+        if (useLanes && lanesX != null && lanesX.Length > 0)
+            x = lanesX[Mathf.Clamp(lanesX.Length / 2, 0, Mathf.Max(0, lanesX.Length - 1))];
+        else
+            x = 0f;
+
+        float z = Mathf.Clamp((startZ + endZ) * 0.5f, startZ, endZ - 1f);
+        var go = Instantiate(jumpPadPrefab, new Vector3(x, padY, z), Quaternion.identity);
+        if (parentForSpawned) go.transform.SetParent(parentForSpawned, true);
+        Debug.Log("[ObstacleSpawner] JumpPad de test instancié.");
+    }
+#endif
+
+    // Optionnel : assurer des valeurs cohérentes dès l'Inspector
+    void OnValidate()
+    {
+        if (maxAttemptsPerElement < 1) maxAttemptsPerElement = 1;
+        if (numberOfElements < 0) numberOfElements = 0;
+        if (endZ < startZ) endZ = startZ;
+        if (laneCount < 2) laneCount = 2;
+        if (minSpacingZ < 0.01f) minSpacingZ = 0.01f;
+        if (maxSpacingZ < minSpacingZ) maxSpacingZ = minSpacingZ;
+        if (forcePadEveryN < 0) forcePadEveryN = 0;
     }
 }
