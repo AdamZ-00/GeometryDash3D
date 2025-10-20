@@ -1505,7 +1505,7 @@ MonoBehaviour:
   parentForSpawned: {fileID: 0}
   obstaclePrefab: {fileID: 2492209206826058993, guid: 3e7457fecd4690d4699f527346d53382, type: 3}
   jumpPadPrefab: {fileID: 933860015298836382, guid: e904d71613c5a5341bbf47e12ae67f53, type: 3}
-  platformPrefab: {fileID: 1188526086085248291, guid: cc3ea82cccc15f343a000b037c80e326, type: 3}
+  platformPrefab: {fileID: 3218038101263193871, guid: f858e53799c06db458405f64b211f563, type: 3}
   tinyObstaclePrefab: {fileID: 2492209206826058993, guid: 937c0519cdd5b5c4aae8d1692584b118, type: 3}
   tinyChance: 0.4
   numberOfElements: 50
