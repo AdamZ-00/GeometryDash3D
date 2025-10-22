@@ -3,26 +3,48 @@ using UnityEngine;
 [RequireComponent(typeof(Rigidbody))]
 public class PlayerController : MonoBehaviour
 {
-
     private LevelManagerLogic level;
 
     [Header("Vitesses")]
     public float forwardSpeed = 8f;
-    public float strafeSpeed = 6f;
     public float jumpForce = 4f;
 
-    [Header("Détection sol")]
-    public float groundCheckDistance = 0.55f;   // distance du rayon vers le bas
-    public LayerMask groundMask;
+    [Header("3 Voies (Runner)")]
+    [Tooltip("Bord gauche et droit de ta zone jouable (pics à ±18 => bornes -18 et +18).")]
+    public float leftBoundary = -18f;
+    public float rightBoundary = 18f;
 
-    [Header("Bords")]
-    public bool clampX = true;
-    public float minX = -2.5f;
-    public float maxX = 2.5f;
+    [Tooltip("Si > 0, force un espacement fixe entre voies (sinon auto depuis les bornes).")]
+    public float laneSpacingOverride = 0f;
+
+    [Tooltip("Vitesse de changement de voie (plus haut = plus réactif).")]
+    public float laneChangeSpeed = 14f;
+
+    [Tooltip("Tolérance de snap sur la voie (évite le drift).")]
+    public float laneSnapEpsilon = 0.02f;
+
+    private const int LANE_COUNT = 3;
+    private int currentLane = 1;    // 0:gauche, 1:milieu, 2:droite
+    private float targetLaneX = 0f;
+
+    [Header("Portails de vitesse")]
+    [Tooltip("Vitesse neutre (mémorisée au Start si < 0). Les portails 'Neutral' reviennent à cette valeur.")]
+    [SerializeField] private float baseForwardSpeed = -1f;
+    private Coroutine speedLerpCo;
+
+    [Header("Détection sol")]
+    public float groundCheckDistance = 0.55f;
+    public LayerMask groundMask;
 
     [Header("Flip en l'air")]
     public float airRotationDuration = 0.35f;
     public Vector3 flipAxis = Vector3.right;
+
+    [Header("Respawn")]
+    [Tooltip("Remettre la vitesse à la valeur de base quand on respawn ?")]
+    public bool resetSpeedOnRespawn = true;
+    [Tooltip("0 = instantané. >0 = transition douce vers la vitesse de base.")]
+    public float respawnSpeedTransition = 0f;
 
     private Rigidbody rb;
     private bool isFlipping = false;
@@ -30,6 +52,38 @@ public class PlayerController : MonoBehaviour
     private float rotT = 0f;
 
     private Vector3 spawnPoint;
+
+    // ===== Helper voies =====
+    private float ComputeLaneX(int laneIndex)
+    {
+        laneIndex = Mathf.Clamp(laneIndex, 0, LANE_COUNT - 1);
+
+        if (laneSpacingOverride > 0f)
+        {
+            // Voies centrées autour de 0: [-d, 0, +d]
+            float d = laneSpacingOverride;
+            return (laneIndex - 1) * d;
+        }
+        else
+        {
+            // Voies équidistantes entre les bornes, centrées autour de 0
+            float center = 0f;
+            float gap = (rightBoundary - leftBoundary) / 4f; // 3 voies -> gap = largeur/4
+            if (laneIndex == 0) return center - gap;
+            if (laneIndex == 2) return center + gap;
+            return center; // milieu
+        }
+    }
+
+    private void StepLane(int dir)
+    {
+        int newLane = Mathf.Clamp(currentLane + dir, 0, LANE_COUNT - 1);
+        if (newLane != currentLane)
+        {
+            currentLane = newLane;
+            targetLaneX = ComputeLaneX(currentLane);
+        }
+    }
 
     void Awake()
     {
@@ -42,50 +96,66 @@ public class PlayerController : MonoBehaviour
         rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
         rb.interpolation = RigidbodyInterpolation.Interpolate;
         level = FindObjectOfType<LevelManagerLogic>();
+
+        // mémorise la vitesse neutre si non définie
+        if (baseForwardSpeed < 0f) baseForwardSpeed = forwardSpeed;
+
+        // voie initiale au milieu
+        currentLane = 1;
+        targetLaneX = ComputeLaneX(currentLane);
+
+        var p = transform.position;
+        p.x = targetLaneX;
+        transform.position = p;
     }
 
     void Update()
     {
         if (level != null && level.IsLevelFinished) return;
-        
-        // saut si au sol
+
+        // changement de voie (tap)
+        if (Input.GetKeyDown(KeyCode.LeftArrow) || Input.GetKeyDown(KeyCode.A)) StepLane(-1);
+        if (Input.GetKeyDown(KeyCode.RightArrow) || Input.GetKeyDown(KeyCode.D)) StepLane(+1);
+
+        // saut
         if (Input.GetButtonDown("Jump") && IsGrounded())
         {
             rb.AddForce(Vector3.up * jumpForce, ForceMode.Impulse);
 
-            // démarrage du quart de tour
+            // flip 90°
             isFlipping = true;
             rotT = 0f;
             rotStart = transform.rotation;
             rotEnd = transform.rotation * Quaternion.AngleAxis(90f, flipAxis.normalized);
-        }
-
-        if (clampX)
-        {
-            var p = transform.position;
-            p.x = Mathf.Clamp(p.x, minX, maxX);
-            transform.position = p;
         }
     }
 
     void FixedUpdate()
     {
         if (level != null && level.IsLevelFinished) return;
-        
-        // déplacement
-        float h = Input.GetAxisRaw("Horizontal");
+
+        // avance constante
         Vector3 v = rb.linearVelocity;
-        v.x = h * strafeSpeed;
         v.z = forwardSpeed;
+
+        // décalage vers la voie cible
+        float deltaX = targetLaneX - rb.position.x;
+        float vx = Mathf.Clamp(deltaX * laneChangeSpeed, -laneChangeSpeed * 2f, laneChangeSpeed * 2f);
+
+        if (Mathf.Abs(deltaX) <= laneSnapEpsilon)
+        {
+            rb.position = new Vector3(targetLaneX, rb.position.y, rb.position.z);
+            vx = 0f;
+        }
+
+        v.x = vx;
         rb.linearVelocity = v;
 
-        // rotation en l’air
+        // flip en l’air
         if (isFlipping)
         {
             rotT += Time.fixedDeltaTime / airRotationDuration;
             rb.MoveRotation(Quaternion.Slerp(rotStart, rotEnd, rotT));
-
-            // stop du flip
             if (rotT >= 1f)
             {
                 rb.MoveRotation(rotEnd);
@@ -96,7 +166,6 @@ public class PlayerController : MonoBehaviour
 
     bool IsGrounded()
     {
-        // tire un rayon vers le bas dans le monde
         return Physics.Raycast(transform.position, Vector3.down, groundCheckDistance, groundMask);
     }
 
@@ -106,37 +175,84 @@ public class PlayerController : MonoBehaviour
         rb.linearVelocity = Vector3.zero;
         rb.angularVelocity = Vector3.zero;
 
-        // remet à la position de départ
-        transform.position = spawnPoint;
+        // remet la voie au centre
+        currentLane = 1;
+        targetLaneX = ComputeLaneX(currentLane);
+        transform.position = new Vector3(targetLaneX, spawnPoint.y, spawnPoint.z);
 
-        // optionnel : remettre l’orientation/états
+        // <<< IMPORTANT : réinitialiser la vitesse >>>
+        if (resetSpeedOnRespawn)
+        {
+            if (speedLerpCo != null) StopCoroutine(speedLerpCo); // coupe un lerp en cours
+            SetForwardSpeed(baseForwardSpeed, respawnSpeedTransition); // 0 = instant
+        }
+
+        // (optionnel) réinitialiser l’orientation/flip si tu veux :
         // transform.rotation = Quaternion.identity;
         // isFlipping = false;
     }
 
-
     private void OnCollisionEnter(Collision other)
     {
-        if (other.collider.CompareTag("Obstacle") || other.collider.CompareTag("Kill")) 
+        if (other.collider.CompareTag("Obstacle") || other.collider.CompareTag("Kill"))
             Respawn();
     }
 
     private void OnTriggerEnter(Collider other)
     {
         if (other.CompareTag("Obstacle") || other.CompareTag("Kill"))
+        {
             Respawn();
+            return;
+        }
     }
 
     public void ForceJump(float customJumpForce)
     {
-        rb.linearVelocity = new Vector3(rb.linearVelocity.x, 0f, rb.linearVelocity.z); // reset du Y pour un saut net
+        rb.linearVelocity = new Vector3(rb.linearVelocity.x, 0f, rb.linearVelocity.z);
         rb.AddForce(Vector3.up * customJumpForce, ForceMode.Impulse);
 
-        // petit flip visuel
         isFlipping = true;
         rotT = 0f;
         rotStart = transform.rotation;
         rotEnd = transform.rotation * Quaternion.AngleAxis(90f, flipAxis.normalized);
     }
 
+    // ===================== API Portails =====================
+    public void SetForwardSpeed(float targetSpeed, float transitionDuration = 0f)
+    {
+        if (speedLerpCo != null) StopCoroutine(speedLerpCo);
+        if (transitionDuration <= 0f) forwardSpeed = targetSpeed;
+        else speedLerpCo = StartCoroutine(LerpForwardSpeed(targetSpeed, transitionDuration));
+    }
+
+    public void SetSpeedMultiplier(float multiplier, float transitionDuration = 0f)
+    {
+        SetForwardSpeed(baseForwardSpeed * multiplier, transitionDuration);
+    }
+
+    public void ResetSpeedToBase(float transitionDuration = 0f)
+    {
+        SetForwardSpeed(baseForwardSpeed, transitionDuration);
+    }
+
+    public void SetBaseForwardSpeed(float newBase, bool alsoApplyNow = false, float transitionDuration = 0f)
+    {
+        baseForwardSpeed = newBase;
+        if (alsoApplyNow) SetForwardSpeed(baseForwardSpeed, transitionDuration);
+    }
+
+    private System.Collections.IEnumerator LerpForwardSpeed(float target, float dur)
+    {
+        float start = forwardSpeed;
+        float t = 0f;
+        dur = Mathf.Max(0.0001f, dur);
+        while (t < 1f)
+        {
+            t += Time.deltaTime / dur;
+            forwardSpeed = Mathf.Lerp(start, target, t);
+            yield return null;
+        }
+        speedLerpCo = null;
+    }
 }
