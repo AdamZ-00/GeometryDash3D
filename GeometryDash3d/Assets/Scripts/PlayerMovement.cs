@@ -46,6 +46,11 @@ public class PlayerController : MonoBehaviour
     [Tooltip("0 = instantané. >0 = transition douce vers la vitesse de base.")]
     public float respawnSpeedTransition = 0f;
 
+    [Header("SFX")]
+    [SerializeField] private AudioSource sfxSource;   // Output = Mixer/SFX (2D)
+    [SerializeField] private AudioClip deathSfx;
+    [Range(0f, 1f)] public float deathVolume = 0.8f;
+
     private Rigidbody rb;
     private bool isFlipping = false;
     private Quaternion rotStart, rotEnd;
@@ -75,6 +80,37 @@ public class PlayerController : MonoBehaviour
         }
     }
 
+    // Force la voie à partir d'une position X monde (ex: X du portail OUT).
+    public void ForceLaneByWorldX(float worldX, bool snapPosition = true)
+    {
+        // Trouve la voie la plus proche de worldX
+        int bestLane = 1;
+        float bestDist = Mathf.Infinity;
+        for (int i = 0; i < 3; i++)
+        {
+            float lx = ComputeLaneX(i);
+            float d = Mathf.Abs(worldX - lx);
+            if (d < bestDist)
+            {
+                bestDist = d;
+                bestLane = i;
+            }
+        }
+
+        // Applique la voie
+        currentLane = bestLane;
+        targetLaneX = ComputeLaneX(currentLane);
+
+        // Optionnel : snapper tout de suite la position X sur la voie choisie
+        if (snapPosition)
+        {
+            var p = transform.position;
+            p.x = targetLaneX;
+            transform.position = p;
+        }
+    }
+
+
     private void StepLane(int dir)
     {
         int newLane = Mathf.Clamp(currentLane + dir, 0, LANE_COUNT - 1);
@@ -88,6 +124,17 @@ public class PlayerController : MonoBehaviour
     void Awake()
     {
         rb = GetComponent<Rigidbody>();
+
+        // SFX de secours si rien n'est assigné
+        if (sfxSource == null)
+        {
+            sfxSource = GetComponent<AudioSource>();
+            if (sfxSource == null) sfxSource = gameObject.AddComponent<AudioSource>();
+            sfxSource.playOnAwake = false;
+            sfxSource.loop = false;
+            sfxSource.spatialBlend = 0f; // 2D
+            // Pense à régler l'Output = SFX (MainMixer) dans l'Inspector
+        }
     }
 
     void Start()
@@ -135,7 +182,7 @@ public class PlayerController : MonoBehaviour
         if (level != null && level.IsLevelFinished) return;
 
         // avance constante
-        Vector3 v = rb.linearVelocity;
+        Vector3 v = rb.linearVelocity;   // <-- use velocity
         v.z = forwardSpeed;
 
         // décalage vers la voie cible
@@ -149,7 +196,7 @@ public class PlayerController : MonoBehaviour
         }
 
         v.x = vx;
-        rb.linearVelocity = v;
+        rb.linearVelocity = v;           // <-- use velocity
 
         // flip en l’air
         if (isFlipping)
@@ -172,7 +219,7 @@ public class PlayerController : MonoBehaviour
     public void Respawn()
     {
         // coupe toute vitesse
-        rb.linearVelocity = Vector3.zero;
+        rb.linearVelocity = Vector3.zero;   // <-- use velocity
         rb.angularVelocity = Vector3.zero;
 
         // remet la voie au centre
@@ -180,14 +227,17 @@ public class PlayerController : MonoBehaviour
         targetLaneX = ComputeLaneX(currentLane);
         transform.position = new Vector3(targetLaneX, spawnPoint.y, spawnPoint.z);
 
-        // <<< IMPORTANT : réinitialiser la vitesse >>>
+        // reset vitesse si demandé
         if (resetSpeedOnRespawn)
         {
-            if (speedLerpCo != null) StopCoroutine(speedLerpCo); // coupe un lerp en cours
-            SetForwardSpeed(baseForwardSpeed, respawnSpeedTransition); // 0 = instant
+            if (speedLerpCo != null) StopCoroutine(speedLerpCo);
+            SetForwardSpeed(baseForwardSpeed, respawnSpeedTransition);
         }
 
-        // (optionnel) réinitialiser l’orientation/flip si tu veux :
+        // redémarre la musique principale (si AudioManager présent)
+        if (SimpleAudioManager.Instance) SimpleAudioManager.Instance.RestartMusic();
+
+        // optionnel :
         // transform.rotation = Quaternion.identity;
         // isFlipping = false;
     }
@@ -195,13 +245,23 @@ public class PlayerController : MonoBehaviour
     private void OnCollisionEnter(Collision other)
     {
         if (other.collider.CompareTag("Obstacle") || other.collider.CompareTag("Kill"))
+        {
+            // SFX de mort
+            if (deathSfx && sfxSource) sfxSource.PlayOneShot(deathSfx, deathVolume);
+
+            // stop musique au moment de la mort
+            if (SimpleAudioManager.Instance) SimpleAudioManager.Instance.StopMusic();
             Respawn();
+        }
     }
 
     private void OnTriggerEnter(Collider other)
     {
         if (other.CompareTag("Obstacle") || other.CompareTag("Kill"))
         {
+            if (deathSfx && sfxSource) sfxSource.PlayOneShot(deathSfx, deathVolume);
+
+            if (SimpleAudioManager.Instance) SimpleAudioManager.Instance.StopMusic();
             Respawn();
             return;
         }
@@ -209,7 +269,7 @@ public class PlayerController : MonoBehaviour
 
     public void ForceJump(float customJumpForce)
     {
-        rb.linearVelocity = new Vector3(rb.linearVelocity.x, 0f, rb.linearVelocity.z);
+        rb.linearVelocity = new Vector3(rb.linearVelocity.x, 0f, rb.linearVelocity.z); // <-- use velocity
         rb.AddForce(Vector3.up * customJumpForce, ForceMode.Impulse);
 
         isFlipping = true;
