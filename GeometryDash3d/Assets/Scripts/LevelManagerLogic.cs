@@ -25,30 +25,28 @@ public class LevelManagerLogic : MonoBehaviour
 
         if (levelCompleteUI) levelCompleteUI.SetActive(true);
 
-        // Met le jeu en pause : la physique et Update/FixedUpdate sont figés
+        // Pause totale du jeu (la musique est déjà stoppée, le SFX de restart jouera en temps réel)
         Time.timeScale = 0f;
     }
 
     public void RestartLevel()
     {
-        // Joue le SFX tout de suite (il joue même en pause si AudioSource est normal)
+        // Joue le SFX et attend en temps réel pendant la pause
         if (restartSfx && sfxSource)
         {
+            sfxSource.ignoreListenerPause = true;          // pour être sûr d’entendre le son même si tu pauses globalement l'audio
             sfxSource.PlayOneShot(restartSfx, restartVolume);
-            // IMPORTANT : on n'enlève PAS la pause ici
             StartCoroutine(RestartAfterSoundRealtime(restartSfx.length));
         }
         else
         {
-            // Pas de son -> restart immédiat
             DoRestart();
         }
     }
 
     private IEnumerator RestartAfterSoundRealtime(float clipLen)
     {
-        // Reste en pause (Time.timeScale == 0) pour que le cube n'avance pas
-        // On attend en temps réel, donc le son peut jouer jusqu'au bout
+        // On reste en pause : le cube n’avance pas pendant que le son joue
         float wait = Mathf.Max(0.1f, clipLen);
         yield return new WaitForSecondsRealtime(wait);
 
@@ -57,7 +55,6 @@ public class LevelManagerLogic : MonoBehaviour
 
     private void DoRestart()
     {
-        // On sort de la pause juste au moment du reload
         Time.timeScale = 1f;
         IsLevelFinished = false;
 
@@ -66,6 +63,6 @@ public class LevelManagerLogic : MonoBehaviour
 
         int idx = SceneManager.GetActiveScene().buildIndex;
         SceneManager.LoadScene(idx);
-        // La musique sera relancée automatiquement par LevelMusic.Start()
+        // La musique sera relancée automatiquement par ton LevelMusic/AudioManager au Start
     }
 }

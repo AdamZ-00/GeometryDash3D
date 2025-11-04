@@ -83,25 +83,18 @@ public class PlayerController : MonoBehaviour
     // Force la voie à partir d'une position X monde (ex: X du portail OUT).
     public void ForceLaneByWorldX(float worldX, bool snapPosition = true)
     {
-        // Trouve la voie la plus proche de worldX
         int bestLane = 1;
         float bestDist = Mathf.Infinity;
         for (int i = 0; i < 3; i++)
         {
             float lx = ComputeLaneX(i);
             float d = Mathf.Abs(worldX - lx);
-            if (d < bestDist)
-            {
-                bestDist = d;
-                bestLane = i;
-            }
+            if (d < bestDist) { bestDist = d; bestLane = i; }
         }
 
-        // Applique la voie
         currentLane = bestLane;
         targetLaneX = ComputeLaneX(currentLane);
 
-        // Optionnel : snapper tout de suite la position X sur la voie choisie
         if (snapPosition)
         {
             var p = transform.position;
@@ -109,7 +102,6 @@ public class PlayerController : MonoBehaviour
             transform.position = p;
         }
     }
-
 
     private void StepLane(int dir)
     {
@@ -182,7 +174,7 @@ public class PlayerController : MonoBehaviour
         if (level != null && level.IsLevelFinished) return;
 
         // avance constante
-        Vector3 v = rb.linearVelocity;   // <-- use velocity
+        Vector3 v = rb.linearVelocity;
         v.z = forwardSpeed;
 
         // décalage vers la voie cible
@@ -196,7 +188,7 @@ public class PlayerController : MonoBehaviour
         }
 
         v.x = vx;
-        rb.linearVelocity = v;           // <-- use velocity
+        rb.linearVelocity = v;
 
         // flip en l’air
         if (isFlipping)
@@ -218,8 +210,7 @@ public class PlayerController : MonoBehaviour
 
     public void Respawn()
     {
-        // coupe toute vitesse
-        rb.linearVelocity = Vector3.zero;   // <-- use velocity
+        rb.linearVelocity = Vector3.zero;
         rb.angularVelocity = Vector3.zero;
 
         // remet la voie au centre
@@ -236,20 +227,17 @@ public class PlayerController : MonoBehaviour
 
         // redémarre la musique principale (si AudioManager présent)
         if (SimpleAudioManager.Instance) SimpleAudioManager.Instance.RestartMusic();
-
-        // optionnel :
-        // transform.rotation = Quaternion.identity;
-        // isFlipping = false;
     }
 
     private void OnCollisionEnter(Collision other)
     {
         if (other.collider.CompareTag("Obstacle") || other.collider.CompareTag("Kill"))
         {
-            // SFX de mort
             if (deathSfx && sfxSource) sfxSource.PlayOneShot(deathSfx, deathVolume);
 
-            // stop musique au moment de la mort
+            // compteur de morts
+            if (DeathCounter.Instance) DeathCounter.Instance.AddDeath();
+
             if (SimpleAudioManager.Instance) SimpleAudioManager.Instance.StopMusic();
             Respawn();
         }
@@ -261,6 +249,8 @@ public class PlayerController : MonoBehaviour
         {
             if (deathSfx && sfxSource) sfxSource.PlayOneShot(deathSfx, deathVolume);
 
+            if (DeathCounter.Instance) DeathCounter.Instance.AddDeath();
+
             if (SimpleAudioManager.Instance) SimpleAudioManager.Instance.StopMusic();
             Respawn();
             return;
@@ -269,7 +259,7 @@ public class PlayerController : MonoBehaviour
 
     public void ForceJump(float customJumpForce)
     {
-        rb.linearVelocity = new Vector3(rb.linearVelocity.x, 0f, rb.linearVelocity.z); // <-- use velocity
+        rb.linearVelocity = new Vector3(rb.linearVelocity.x, 0f, rb.linearVelocity.z);
         rb.AddForce(Vector3.up * customJumpForce, ForceMode.Impulse);
 
         isFlipping = true;
