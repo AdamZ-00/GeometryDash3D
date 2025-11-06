@@ -12,10 +12,8 @@ public class SpeedPortal : MonoBehaviour
     [Header("Paramètres")]
     [Tooltip("Accélérer/Ralentir : 1.25 = +25%, 0.75 = -25% (appliqué SUR la vitesse ACTUELLE)")]
     public float multiplier = 1.25f;
-
     [Tooltip("Vitesse exacte si SetExactValue")]
     public float setValue = 12f;
-
     [Tooltip("Transition de vitesse (0 = instant)")]
     public float transitionDuration = 0.2f;
 
@@ -32,11 +30,19 @@ public class SpeedPortal : MonoBehaviour
     public AudioClip pickupSfx;
     [Range(0, 1)] public float pickupSfxVolume = 0.8f;
 
-    [Header("Options")]
+    [Header("Respawn")]
+    [Tooltip("Si true, le bonus réapparaît après le délai")]
+    public bool respawnAfterPickup = true;
+    [Tooltip("Délai avant réapparition (secondes, temps réel)")]
+    public float respawnDelay = 2f;
+
+    [Header("Autres options")]
     public bool oneShot = true;
+    [Tooltip("Utilisé seulement si respawnAfterPickup == false")]
     public bool destroyOnUse = true;
     public string playerTag = "Player";
 
+    // --- internes ---
     private bool used = false;
     private Collider col;
     private Renderer[] rends;
@@ -63,7 +69,7 @@ public class SpeedPortal : MonoBehaviour
         var pc = other.GetComponent<PlayerController>() ?? other.GetComponentInParent<PlayerController>();
         if (pc == null) return;
 
-        // --- Applique l’effet de vitesse ---
+        // --- effet de vitesse ---
         switch (kind)
         {
             case PortalKind.Accelerate:
@@ -81,30 +87,27 @@ public class SpeedPortal : MonoBehaviour
             case PortalKind.Neutral:
                 pc.ResetSpeedToBase(transitionDuration);
                 break;
-
             case PortalKind.SetExactValue:
                 pc.SetForwardSpeed(Mathf.Max(0.01f, setValue), transitionDuration);
                 break;
-
             case PortalKind.MultiplyCurrent:
                 ApplyCumulative(pc, Mathf.Max(0.01f, multiplier), transitionDuration);
                 break;
         }
 
-        // --- Empêche les doubles triggers et lance la disparition ---
+        // --- sécurité & FX ---
         if (oneShot) used = true;
         if (col) col.enabled = false;
 
         if (pickupSfx)
         {
-            // Joue en 2D rapide (source one-shot éphémère)
             var src = new GameObject("PortalPickupSFX").AddComponent<AudioSource>();
             src.spatialBlend = 0f;
             src.playOnAwake = false;
             src.clip = pickupSfx;
             src.volume = pickupSfxVolume;
             src.Play();
-            Object.Destroy(src.gameObject, pickupSfx.length + 0.2f);
+            Destroy(src.gameObject, pickupSfx.length + 0.2f);
         }
 
         if (pickupVfx)
@@ -114,13 +117,11 @@ public class SpeedPortal : MonoBehaviour
             Destroy(vfx.gameObject, vfx.main.duration + vfx.main.startLifetime.constantMax + 0.5f);
         }
 
+        // --- disparition + respawn / destroy ---
         if (hideOnUse)
-            StartCoroutine(VanishThenEnd());
+            StartCoroutine(VanishThenHandle());
         else
-        {
-            if (destroyOnUse) Destroy(gameObject);
-            else gameObject.SetActive(false);
-        }
+            HandleAfterPickup();
     }
 
     /// <summary> Multiplie la vitesse ACTUELLE du joueur avec transition. </summary>
@@ -131,21 +132,19 @@ public class SpeedPortal : MonoBehaviour
         pc.SetForwardSpeed(target, dur);
     }
 
-    private IEnumerator VanishThenEnd()
+    private IEnumerator VanishThenHandle()
     {
         float t = 0f;
         float dur = Mathf.Max(0.01f, hideDuration);
 
-        // Prépare MaterialPropertyBlock pour éviter d’instance les materials
-        MaterialPropertyBlock mpb = null;
-        if (fadeColorIfPossible) mpb = new MaterialPropertyBlock();
+        MaterialPropertyBlock mpb = fadeColorIfPossible ? new MaterialPropertyBlock() : null;
 
         while (t < 1f)
         {
             t += Time.deltaTime / dur;
             // Scale vers 0 (ease out quad)
             float k = 1f - t;
-            k = k * k; // ease
+            k *= k;
             transform.localScale = Vector3.LerpUnclamped(Vector3.zero, startScale, k);
 
             if (fadeColorIfPossible && rends != null)
@@ -155,14 +154,9 @@ public class SpeedPortal : MonoBehaviour
                 {
                     var r = rends[i];
                     if (!r) continue;
-
-                    // Si le shader expose _Color, on ajuste l’alpha via MPB
-                    // (ne touche pas aux materials partagés)
-                    Color c;
-                    r.GetPropertyBlock(mpb);
                     if (r.sharedMaterial && r.sharedMaterial.HasProperty("_Color"))
                     {
-                        c = r.sharedMaterial.color;
+                        var c = r.sharedMaterial.color;
                         c.a = a;
                         mpb.SetColor("_Color", c);
                         r.SetPropertyBlock(mpb);
@@ -173,8 +167,56 @@ public class SpeedPortal : MonoBehaviour
             yield return null;
         }
 
-        // Fin
-        if (destroyOnUse) Destroy(gameObject);
-        else gameObject.SetActive(false);
+        HandleAfterPickup();
+    }
+
+    private void HandleAfterPickup()
+    {
+        if (respawnAfterPickup)
+        {
+            // IMPORTANT : on ne désactive PAS le GameObject, sinon la coroutine stoppe.
+            // On cache le visuel et on laisse ce MonoBehaviour actif pour timer le respawn.
+            HideVisuals();
+            StartCoroutine(RespawnTimer());
+        }
+        else
+        {
+            if (destroyOnUse) Destroy(gameObject);
+            else HideVisuals(); // reste caché
+        }
+    }
+
+    private IEnumerator RespawnTimer()
+    {
+        yield return new WaitForSecondsRealtime(Mathf.Max(0f, respawnDelay));
+        // Ré-apparition
+        ShowVisuals();
+        transform.localScale = startScale;
+        if (col) col.enabled = true;
+        used = false; // prêt à être repris
+    }
+
+    // ---- helpers visuels ----
+    private void HideVisuals()
+    {
+        if (rends != null)
+        {
+            for (int i = 0; i < rends.Length; i++)
+                if (rends[i]) rends[i].enabled = false;
+        }
+        // garde ce script actif pour que la coroutine continue
+    }
+
+    private void ShowVisuals()
+    {
+        if (rends != null)
+        {
+            for (int i = 0; i < rends.Length; i++)
+                if (rends[i]) rends[i].enabled = true;
+
+            // enlève les MPB de fade pour revenir aux couleurs d’origine
+            for (int i = 0; i < rends.Length; i++)
+                if (rends[i]) rends[i].SetPropertyBlock(null);
+        }
     }
 }
