@@ -9,6 +9,14 @@ public class PlayerController : MonoBehaviour
     public float forwardSpeed = 8f;
     public float jumpForce = 4f;
 
+    [Header("Jump (maintien)")]
+    [Tooltip("Si true: maintenir Espace fait resauter dès qu'on retouche le sol, façon Geometry Dash.")]
+    public bool holdToAutoJump = true;
+
+    // états internes du saut
+    private bool wasGrounded = false;       // état sol au frame précédent
+    private bool jumpedThisGround = false;  // déjà sauté pendant ce contact au sol
+
     [Header("3 Voies (Runner)")]
     [Tooltip("Bord gauche et droit de ta zone jouable (pics à ±18 => bornes -18 et +18).")]
     public float leftBoundary = -18f;
@@ -62,21 +70,18 @@ public class PlayerController : MonoBehaviour
     private float ComputeLaneX(int laneIndex)
     {
         laneIndex = Mathf.Clamp(laneIndex, 0, LANE_COUNT - 1);
-
         if (laneSpacingOverride > 0f)
         {
-            // Voies centrées autour de 0: [-d, 0, +d]
             float d = laneSpacingOverride;
-            return (laneIndex - 1) * d;
+            return (laneIndex - 1) * d; // [-d, 0, +d]
         }
         else
         {
-            // Voies équidistantes entre les bornes, centrées autour de 0
             float center = 0f;
             float gap = (rightBoundary - leftBoundary) / 4f; // 3 voies -> gap = largeur/4
             if (laneIndex == 0) return center - gap;
             if (laneIndex == 2) return center + gap;
-            return center; // milieu
+            return center;
         }
     }
 
@@ -125,7 +130,6 @@ public class PlayerController : MonoBehaviour
             sfxSource.playOnAwake = false;
             sfxSource.loop = false;
             sfxSource.spatialBlend = 0f; // 2D
-            // Pense à régler l'Output = SFX (MainMixer) dans l'Inspector
         }
     }
 
@@ -136,7 +140,6 @@ public class PlayerController : MonoBehaviour
         rb.interpolation = RigidbodyInterpolation.Interpolate;
         level = FindObjectOfType<LevelManagerLogic>();
 
-        // mémorise la vitesse neutre si non définie
         if (baseForwardSpeed < 0f) baseForwardSpeed = forwardSpeed;
 
         // voie initiale au milieu
@@ -146,27 +149,41 @@ public class PlayerController : MonoBehaviour
         var p = transform.position;
         p.x = targetLaneX;
         transform.position = p;
+
+        wasGrounded = IsGrounded();
+        jumpedThisGround = false;
     }
 
     void Update()
     {
         if (level != null && level.IsLevelFinished) return;
 
-        // changement de voie (tap)
+        // --- gestion 3 voies (tap) ---
         if (Input.GetKeyDown(KeyCode.LeftArrow) || Input.GetKeyDown(KeyCode.A)) StepLane(-1);
         if (Input.GetKeyDown(KeyCode.RightArrow) || Input.GetKeyDown(KeyCode.D)) StepLane(+1);
 
-        // saut
-        if (Input.GetButtonDown("Jump") && IsGrounded())
-        {
-            rb.AddForce(Vector3.up * jumpForce, ForceMode.Impulse);
+        // --- logique de saut façon GD ---
+        bool grounded = IsGrounded();
 
-            // flip 90°
-            isFlipping = true;
-            rotT = 0f;
-            rotStart = transform.rotation;
-            rotEnd = transform.rotation * Quaternion.AngleAxis(90f, flipAxis.normalized);
+        // reset du flag quand on vient d'atterrir
+        if (grounded && !wasGrounded)
+            jumpedThisGround = false;
+
+        // condition de déclenchement : au sol + (appui ou maintien) + pas encore sauté pendant ce contact
+        bool wantJumpNow =
+            grounded &&
+            !jumpedThisGround &&
+            (
+                Input.GetButtonDown("Jump") ||
+                (holdToAutoJump && Input.GetButton("Jump"))
+            );
+
+        if (wantJumpNow)
+        {
+            DoJump(); // saut de hauteur constante
         }
+
+        wasGrounded = grounded;
     }
 
     void FixedUpdate()
@@ -203,6 +220,25 @@ public class PlayerController : MonoBehaviour
         }
     }
 
+    // --- Saut unifié (utilisé par Update et ForceJump) ---
+    private void DoJump(float forceOverride = -1f)
+    {
+        float f = (forceOverride > 0f) ? forceOverride : jumpForce;
+
+        // hauteur constante : on remet VY à 0 avant l'impulsion
+        rb.linearVelocity = new Vector3(rb.linearVelocity.x, 0f, rb.linearVelocity.z);
+        rb.AddForce(Vector3.up * f, ForceMode.Impulse);
+
+        // démarre le quart de tour
+        isFlipping = true;
+        rotT = 0f;
+        rotStart = transform.rotation;
+        rotEnd = transform.rotation * Quaternion.AngleAxis(90f, flipAxis.normalized);
+
+        // on a "consommé" le saut pour ce contact au sol
+        jumpedThisGround = true;
+    }
+
     bool IsGrounded()
     {
         return Physics.Raycast(transform.position, Vector3.down, groundCheckDistance, groundMask);
@@ -227,6 +263,10 @@ public class PlayerController : MonoBehaviour
 
         // redémarre la musique principale (si AudioManager présent)
         if (SimpleAudioManager.Instance) SimpleAudioManager.Instance.RestartMusic();
+
+        // on repart propre : on recalera jumpedThisGround au prochain atterrissage
+        wasGrounded = IsGrounded();
+        if (wasGrounded) jumpedThisGround = false;
     }
 
     private void OnCollisionEnter(Collision other)
@@ -234,10 +274,7 @@ public class PlayerController : MonoBehaviour
         if (other.collider.CompareTag("Obstacle") || other.collider.CompareTag("Kill"))
         {
             if (deathSfx && sfxSource) sfxSource.PlayOneShot(deathSfx, deathVolume);
-
-            // compteur de morts
             if (DeathCounter.Instance) DeathCounter.Instance.AddDeath();
-
             if (SimpleAudioManager.Instance) SimpleAudioManager.Instance.StopMusic();
             Respawn();
         }
@@ -248,9 +285,7 @@ public class PlayerController : MonoBehaviour
         if (other.CompareTag("Obstacle") || other.CompareTag("Kill"))
         {
             if (deathSfx && sfxSource) sfxSource.PlayOneShot(deathSfx, deathVolume);
-
             if (DeathCounter.Instance) DeathCounter.Instance.AddDeath();
-
             if (SimpleAudioManager.Instance) SimpleAudioManager.Instance.StopMusic();
             Respawn();
             return;
@@ -259,13 +294,7 @@ public class PlayerController : MonoBehaviour
 
     public void ForceJump(float customJumpForce)
     {
-        rb.linearVelocity = new Vector3(rb.linearVelocity.x, 0f, rb.linearVelocity.z);
-        rb.AddForce(Vector3.up * customJumpForce, ForceMode.Impulse);
-
-        isFlipping = true;
-        rotT = 0f;
-        rotStart = transform.rotation;
-        rotEnd = transform.rotation * Quaternion.AngleAxis(90f, flipAxis.normalized);
+        DoJump(customJumpForce);
     }
 
     // ===================== API Portails =====================
