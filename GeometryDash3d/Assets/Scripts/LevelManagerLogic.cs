@@ -7,62 +7,87 @@ public class LevelManagerLogic : MonoBehaviour
     public bool IsLevelFinished { get; private set; } = false;
 
     [Header("UI")]
-    [SerializeField] private GameObject levelCompleteUI;
+    [SerializeField] private GameObject levelCompleteUI; // panneau avec boutons Restart / Menu
 
-    [Header("SFX")]
+    [Header("SFX (optionnel)")]
     [SerializeField] private AudioSource sfxSource;   // Output = SFX (2D)
     [SerializeField] private AudioClip restartSfx;
     [Range(0f, 1f)] public float restartVolume = 0.8f;
+
+    private bool isTransitioning = false; // anti double-clic
 
     public void FinishRun()
     {
         if (IsLevelFinished) return;
         IsLevelFinished = true;
 
-        // Stop musique à la fin du niveau
+        // 🎵 Stop musique à la fin du niveau
         if (SimpleAudioManager.Instance)
             SimpleAudioManager.Instance.StopMusic();
 
         if (levelCompleteUI) levelCompleteUI.SetActive(true);
 
-        // Pause totale du jeu (la musique est déjà stoppée, le SFX de restart jouera en temps réel)
+        // >>> Cacher le bouton Pause à l’écran de fin
+        var smc = FindObjectOfType<SimpleMenuController>();
+        if (smc) smc.HidePauseButtonOnLevelFinish();
+
+        Cursor.visible = true;
+        Cursor.lockState = CursorLockMode.None;
+
         Time.timeScale = 0f;
     }
 
-    public void RestartLevel()
+    // --- Bouton RESTART (depuis l’écran de fin) ---
+    public void Btn_RestartLevel()
     {
-        // Joue le SFX et attend en temps réel pendant la pause
+        if (isTransitioning) return;
+        isTransitioning = true;
+
         if (restartSfx && sfxSource)
         {
-            sfxSource.ignoreListenerPause = true;          // pour être sûr d’entendre le son même si tu pauses globalement l'audio
+            sfxSource.ignoreListenerPause = true;
             sfxSource.PlayOneShot(restartSfx, restartVolume);
-            StartCoroutine(RestartAfterSoundRealtime(restartSfx.length));
+            StartCoroutine(ReloadCurrentSceneRealtime(restartSfx.length, autoPlayAfterReload: true));
         }
         else
         {
-            DoRestart();
+            StartCoroutine(ReloadCurrentSceneRealtime(0f, autoPlayAfterReload: true));
         }
     }
 
-    private IEnumerator RestartAfterSoundRealtime(float clipLen)
+    // --- Bouton MENU (depuis l’écran de fin) ---
+    public void Btn_BackToMenu()
     {
-        // On reste en pause : le cube n’avance pas pendant que le son joue
-        float wait = Mathf.Max(0.1f, clipLen);
-        yield return new WaitForSecondsRealtime(wait);
+        if (isTransitioning) return;
+        isTransitioning = true;
 
-        DoRestart();
+        // On relance la scène SANS auto-play pour retomber sur le menu
+        StartCoroutine(ReloadCurrentSceneRealtime(0f, autoPlayAfterReload: false));
     }
 
-    private void DoRestart()
+    private IEnumerator ReloadCurrentSceneRealtime(float waitSec, bool autoPlayAfterReload)
     {
+        // Attente en temps réel (la scène est en pause)
+        yield return new WaitForSecondsRealtime(Mathf.Max(0f, waitSec));
+
+        // Normalise l’état avant reload
         Time.timeScale = 1f;
         IsLevelFinished = false;
 
+        // Curseur visible car on peut arriver au menu
+        Cursor.visible = true;
+        Cursor.lockState = CursorLockMode.None;
+
+        // 🎵 Stop musique avant reload
         if (SimpleAudioManager.Instance)
             SimpleAudioManager.Instance.StopMusic();
 
-        int idx = SceneManager.GetActiveScene().buildIndex;
-        SceneManager.LoadScene(idx);
-        // La musique sera relancée automatiquement par ton LevelMusic/AudioManager au Start
+        // >>> Flag pour SimpleMenuController : auto-play une seule fois si Restart
+        PlayerPrefs.SetInt("auto_play_once", autoPlayAfterReload ? 1 : 0);
+        PlayerPrefs.Save();
+
+        // Reload de la scène courante (reset total)
+        Scene current = SceneManager.GetActiveScene();
+        SceneManager.LoadScene(current.buildIndex);
     }
 }
