@@ -166,4 +166,14 @@ public class SimpleMenuController : MonoBehaviour
     {
         SetPauseButtonVisible(false);
     }
+
+    // Ferme tous les panneaux de menu (utilisé par PauseController.Resume)
+    public void CloseAllPanels()
+    {
+        if (mainPanel) mainPanel.SetActive(false);
+        if (settingsPanel) settingsPanel.SetActive(false);
+        if (skinsPanel) skinsPanel.SetActive(false);
+        if (levelSelectPanel) levelSelectPanel.SetActive(false);
+    }
+
 }

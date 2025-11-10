@@ -152,6 +152,10 @@ public class PlayerController : MonoBehaviour
 
         wasGrounded = IsGrounded();
         jumpedThisGround = false;
+
+        // >>> applique le skin sauvegardé (via SkinApplier sur le Player)
+        var skin = GetComponent<ModelSwapSkinApplier>();
+        if (skin) skin.ApplySaved();
     }
 
     void Update()

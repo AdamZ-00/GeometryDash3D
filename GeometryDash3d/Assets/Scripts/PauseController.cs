@@ -47,8 +47,11 @@ public class PauseController : MonoBehaviour
         isPaused = false;
         Time.timeScale = 1f;
 
-        // 🔊 REPRISE GLOBALE DE L’AUDIO
         AudioListener.pause = false;
+
+        // Ferme TOUT panneau de menu au cas où un panel serait resté actif
+        var smc = FindObjectOfType<SimpleMenuController>(true);
+        if (smc) smc.CloseAllPanels();
 
         if (pausePanel) pausePanel.SetActive(false);
         if (skinsPanel) skinsPanel.SetActive(false);
@@ -58,6 +61,7 @@ public class PauseController : MonoBehaviour
         Cursor.visible = false;
         Cursor.lockState = CursorLockMode.Locked;
     }
+
 
     // --- Boutons ---
     public void Btn_Resume() => Resume();
