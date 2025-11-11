@@ -5251,6 +5251,7 @@ MonoBehaviour:
   levelSelectPanel: {fileID: 1976852459}
   openMenuOnStart: 1
   pauseButton: {fileID: 0}
+  menuMusic: {fileID: 8300000, guid: 9bdba6cd679476544a217c83839c2d3d, type: 3}
 --- !u!114 &1077894182
 MonoBehaviour:
   m_ObjectHideFlags: 0

@@ -1,13 +1,14 @@
 ﻿using UnityEngine;
 using UnityEngine.Audio;
+using System.Collections;
 
 public class SimpleAudioManager : MonoBehaviour
 {
     public static SimpleAudioManager Instance { get; private set; }
 
     [Header("Refs")]
-    [SerializeField] private AudioSource musicSource;     // 2D, Loop, Output=Music
-    [SerializeField] private AudioMixer mainMixer;        // ton AudioMixer
+    [SerializeField] private AudioSource musicSource;     // 2D, Loop, Output = Music
+    [SerializeField] private AudioMixer mainMixer;
     [SerializeField] private string exposedMasterParam = "MasterVolume";
     [SerializeField] private string exposedMusicParam = "MusicVolume";
     [SerializeField] private string exposedSfxParam = "SfxVolume";
@@ -27,8 +28,11 @@ public class SimpleAudioManager : MonoBehaviour
 
     // --- état interne pause ---
     bool _pauseLock = false;              // jeu en pause → ne jamais (re)jouer
-    bool _pendingPlay = false;            // play demandé pendant la pause
-    bool _wasPlayingBeforePause = false;  // jouait au moment de la pause
+    bool _pendingPlay = false;            // play/crossfade demandé pendant la pause
+    float _pendingFade = 0.6f;            // durée à utiliser quand on reprendra
+    bool _wasPlayingBeforePause = false;
+
+    Coroutine _fadeCo;                    // une seule coroutine de fade à la fois
 
     void Awake()
     {
@@ -38,11 +42,10 @@ public class SimpleAudioManager : MonoBehaviour
 
         if (!musicSource) musicSource = GetComponent<AudioSource>();
 
-        // Charger les prefs sauvegardées
+        // Charger préférences
         masterVolume01 = PlayerPrefs.GetFloat(KEY_MASTER, masterVolume01);
         musicVolume01 = PlayerPrefs.GetFloat(KEY_MUSIC, musicVolume01);
         sfxVolume01 = PlayerPrefs.GetFloat(KEY_SFX, sfxVolume01);
-
         bool muted = PlayerPrefs.GetInt(KEY_MUTE, 0) == 1;
 
         // Appliquer au mixer
@@ -50,17 +53,17 @@ public class SimpleAudioManager : MonoBehaviour
         ApplyMixerVolume(exposedMusicParam, muted ? 0f : musicVolume01);
         ApplyMixerVolume(exposedSfxParam, muted ? 0f : sfxVolume01);
 
-        // Ajuster la source musique
+        // Source musique
         if (musicSource)
         {
-            musicSource.playOnAwake = false;  // IMPORTANT
+            musicSource.playOnAwake = false;
             musicSource.loop = true;
-            musicSource.volume = musicVolume01;
             musicSource.spatialBlend = 0f;
+            musicSource.volume = musicVolume01;
         }
     }
 
-    // ===== Pause globale “logique” (on garde aussi AudioListener.pause côté PauseController) =====
+    // ===== Pause =====
     public void OnGamePauseChanged(bool paused)
     {
         _pauseLock = paused;
@@ -72,18 +75,20 @@ public class SimpleAudioManager : MonoBehaviour
         }
         else
         {
+            // Si on avait demandé un play/crossfade pendant la pause
             if (_pendingPlay && CurrentClip != null)
             {
                 _pendingPlay = false;
-                ForcePlay(CurrentClip);
+                PlayMusicWithFade(CurrentClip, _pendingFade);
                 return;
             }
+
             if (_wasPlayingBeforePause && musicSource && musicSource.clip && !musicSource.isPlaying)
                 musicSource.UnPause();
         }
     }
 
-    // ===== Musique =====
+    // ===== API Musique (play direct) =====
     public void PlayMusic(AudioClip clip)
     {
         if (!clip || musicSource == null) return;
@@ -91,18 +96,24 @@ public class SimpleAudioManager : MonoBehaviour
         if (_pauseLock)
         {
             CurrentClip = clip;
-            musicSource.clip = clip;
-            _pendingPlay = true;    // on jouera à la sortie de pause
+            _pendingPlay = true;
+            _pendingFade = 0f; // pas de fade imposé
             return;
         }
 
         ForcePlay(clip);
     }
 
+    public void RestartMusic()
+    {
+        if (CurrentClip) PlayMusic(CurrentClip);
+    }
+
     public void StopMusic()
     {
         if (musicSource) musicSource.Stop();
         _pendingPlay = false;
+        KillFade();
     }
 
     public void PauseMusic()
@@ -117,12 +128,53 @@ public class SimpleAudioManager : MonoBehaviour
         _wasPlayingBeforePause = false;
     }
 
-    public void RestartMusic()
+    // ===== Fades =====
+    /// <summary>Fade-out simple de la musique en cours.</summary>
+    public void FadeOutMusic(float duration = 1f)
     {
-        if (CurrentClip) PlayMusic(CurrentClip);
+        if (!musicSource || !musicSource.isPlaying) return;
+        StartFade(FadeOutCoroutine(duration));
     }
 
-    // ===== Volumes (0..1 linéaires) =====
+    /// <summary>Joue un clip avec fade-in (depuis 0 → musicVolume01).</summary>
+    public void PlayMusicWithFade(AudioClip clip, float fadeIn = 1f)
+    {
+        if (!clip || musicSource == null) return;
+
+        if (_pauseLock)
+        {
+            CurrentClip = clip;
+            _pendingPlay = true;
+            _pendingFade = Mathf.Max(0f, fadeIn);
+            return;
+        }
+
+        StartFade(FadeInSwitchCoroutine(clip, Mathf.Max(0f, fadeIn)));
+    }
+
+    /// <summary>
+    /// “Crossfade” séquentiel : fade-out du clip courant puis fade-in du nouveau clip.
+    /// (Implémentation mono-source, donc pas de chevauchement réel.)
+    /// </summary>
+    public void CrossfadeTo(AudioClip newClip, float duration = 0.6f)
+    {
+        if (!newClip || musicSource == null) return;
+
+        if (_pauseLock)
+        {
+            CurrentClip = newClip;
+            _pendingPlay = true;
+            _pendingFade = Mathf.Max(0f, duration);
+            return;
+        }
+
+        // si c'est déjà ce clip et qu'il joue, on ne fait rien
+        if (musicSource.isPlaying && musicSource.clip == newClip) return;
+
+        StartFade(FadeOutInCoroutine(newClip, Mathf.Max(0f, duration)));
+    }
+
+    // ===== Volumes =====
     public void SetMasterVolume01(float v)
     {
         masterVolume01 = Mathf.Clamp01(v);
@@ -172,11 +224,96 @@ public class SimpleAudioManager : MonoBehaviour
 
     void ForcePlay(AudioClip clip)
     {
+        KillFade();
         musicSource.Stop();
         CurrentClip = clip;
         musicSource.clip = clip;
         musicSource.volume = musicVolume01;
         musicSource.loop = true;
         musicSource.Play();
+    }
+
+    void StartFade(IEnumerator routine)
+    {
+        KillFade();
+        _fadeCo = StartCoroutine(routine);
+    }
+
+    void KillFade()
+    {
+        if (_fadeCo != null) { StopCoroutine(_fadeCo); _fadeCo = null; }
+    }
+
+    // --- coroutines de fade (temps non-scalé pour marcher en pause menu) ---
+    IEnumerator FadeOutCoroutine(float duration)
+    {
+        if (musicSource == null) yield break;
+        float startVol = musicSource.volume;
+        float t = 0f;
+        while (t < duration)
+        {
+            t += Time.unscaledDeltaTime;
+            musicSource.volume = Mathf.Lerp(startVol, 0f, t / duration);
+            yield return null;
+        }
+        musicSource.volume = 0f;
+        musicSource.Stop();
+        musicSource.volume = musicVolume01; // prêt pour la prochaine lecture
+        _fadeCo = null;
+    }
+
+    IEnumerator FadeInSwitchCoroutine(AudioClip clip, float fadeIn)
+    {
+        // prépare et joue à volume 0
+        musicSource.Stop();
+        CurrentClip = clip;
+        musicSource.clip = clip;
+        musicSource.volume = 0f;
+        musicSource.loop = true;
+        musicSource.Play();
+
+        if (fadeIn <= 0f) { musicSource.volume = musicVolume01; _fadeCo = null; yield break; }
+
+        float t = 0f;
+        while (t < fadeIn)
+        {
+            t += Time.unscaledDeltaTime;
+            musicSource.volume = Mathf.Lerp(0f, musicVolume01, t / fadeIn);
+            yield return null;
+        }
+        musicSource.volume = musicVolume01;
+        _fadeCo = null;
+    }
+
+    IEnumerator FadeOutInCoroutine(AudioClip next, float dur)
+    {
+        // 1) fade-out
+        float startVol = musicSource.volume;
+        float t = 0f;
+        while (t < dur)
+        {
+            t += Time.unscaledDeltaTime;
+            musicSource.volume = Mathf.Lerp(startVol, 0f, t / dur);
+            yield return null;
+        }
+        musicSource.volume = 0f;
+        musicSource.Stop();
+
+        // 2) switch + fade-in
+        CurrentClip = next;
+        musicSource.clip = next;
+        musicSource.volume = 0f;
+        musicSource.loop = true;
+        musicSource.Play();
+
+        t = 0f;
+        while (t < dur)
+        {
+            t += Time.unscaledDeltaTime;
+            musicSource.volume = Mathf.Lerp(0f, musicVolume01, t / dur);
+            yield return null;
+        }
+        musicSource.volume = musicVolume01;
+        _fadeCo = null;
     }
 }

@@ -9,115 +9,114 @@ public class SettingsUI : MonoBehaviour
     public Slider sfxSlider;     // 0..1
     public Toggle muteToggle;
 
-    // Clés UI (on sépare de SimpleAudioManager si tu veux des valeurs par défaut différentes)
+    // Clés UI (on garde ton espace de clés)
     const string KEY_MASTER = "ui_master_v01";
     const string KEY_MUSIC = "ui_music_v01";
     const string KEY_SFX = "ui_sfx_v01";
     const string KEY_MUTE = "ui_mute";
 
-    float _lastMaster = 1.0f;
-    float _lastMusic = 0.8f;
-    float _lastSfx = 0.9f;
+    // Valeurs par défaut affichées si aucune pref
+    float _defaultMaster = 1.0f;
+    float _defaultMusic = 0.8f;
+    float _defaultSfx = 0.9f;
 
-    void Start()
+    bool _loading = false;
+
+    void OnEnable()
     {
-        // Récupère valeurs sauvegardées sinon celles de l'AudioManager
-        float m = PlayerPrefs.GetFloat(KEY_MASTER, SimpleAudioManager.Instance ? SimpleAudioManager.Instance.masterVolume01 : 1.0f);
-        float mu = PlayerPrefs.GetFloat(KEY_MUSIC, SimpleAudioManager.Instance ? SimpleAudioManager.Instance.musicVolume01 : 0.8f);
-        float sx = PlayerPrefs.GetFloat(KEY_SFX, SimpleAudioManager.Instance ? SimpleAudioManager.Instance.sfxVolume01 : 0.9f);
-        bool mt = PlayerPrefs.GetInt(KEY_MUTE, 0) == 1;
+        _loading = true;
 
-        // Applique au système
+        // 1) Charger les valeurs persistées (sinon reprendre celles de l’AudioManager, sinon défauts)
+        float vMaster = PlayerPrefs.GetFloat(KEY_MASTER,
+            SimpleAudioManager.Instance ? SimpleAudioManager.Instance.masterVolume01 : _defaultMaster);
+        float vMusic = PlayerPrefs.GetFloat(KEY_MUSIC,
+            SimpleAudioManager.Instance ? SimpleAudioManager.Instance.musicVolume01 : _defaultMusic);
+        float vSfx = PlayerPrefs.GetFloat(KEY_SFX,
+            SimpleAudioManager.Instance ? SimpleAudioManager.Instance.sfxVolume01 : _defaultSfx);
+        bool muted = PlayerPrefs.GetInt(KEY_MUTE, 0) == 1;
+
+        // 2) Appliquer à l’audio (mute via Master, sans écraser les sliders)
         if (SimpleAudioManager.Instance)
         {
-            SimpleAudioManager.Instance.SetMasterVolume01(mt ? 0f : m);
-            SimpleAudioManager.Instance.SetMusicVolume01(mt ? 0f : mu);
-            SimpleAudioManager.Instance.SetSfxVolume01(mt ? 0f : sx);
-            SimpleAudioManager.Instance.MuteAll(mt);
+            SimpleAudioManager.Instance.MuteAll(muted);          // coupe/remet le Master dans le Mixer
+            SimpleAudioManager.Instance.SetMasterVolume01(vMaster);
+            SimpleAudioManager.Instance.SetMusicVolume01(vMusic);
+            SimpleAudioManager.Instance.SetSfxVolume01(vSfx);
         }
 
-        // UI
-        SetupSlider(masterSlider, m);
-        SetupSlider(musicSlider, mu);
-        SetupSlider(sfxSlider, sx);
-        muteToggle.isOn = mt;
+        // 3) Configurer l’UI sans déclencher d’événements
+        if (masterSlider) { masterSlider.minValue = 0f; masterSlider.maxValue = 1f; masterSlider.SetValueWithoutNotify(vMaster); }
+        if (musicSlider) { musicSlider.minValue = 0f; musicSlider.maxValue = 1f; musicSlider.SetValueWithoutNotify(vMusic); }
+        if (sfxSlider) { sfxSlider.minValue = 0f; sfxSlider.maxValue = 1f; sfxSlider.SetValueWithoutNotify(vSfx); }
+        if (muteToggle) { muteToggle.SetIsOnWithoutNotify(muted); }
 
-        if (m > 0.001f) _lastMaster = m;
-        if (mu > 0.001f) _lastMusic = mu;
-        if (sx > 0.001f) _lastSfx = sx;
+        // 4) (Ré)abonner proprement
+        RemoveAllListeners();
+        if (masterSlider) masterSlider.onValueChanged.AddListener(OnMasterChanged);
+        if (musicSlider) musicSlider.onValueChanged.AddListener(OnMusicChanged);
+        if (sfxSlider) sfxSlider.onValueChanged.AddListener(OnSfxChanged);
+        if (muteToggle) muteToggle.onValueChanged.AddListener(OnMuteToggled);
 
-        // Abonnements
-        masterSlider.onValueChanged.AddListener(OnMasterChanged);
-        musicSlider.onValueChanged.AddListener(OnMusicChanged);
-        sfxSlider.onValueChanged.AddListener(OnSfxChanged);
-        muteToggle.onValueChanged.AddListener(OnMuteToggled);
+        _loading = false;
     }
 
-    void SetupSlider(Slider s, float v) { s.minValue = 0f; s.maxValue = 1f; s.value = v; }
+    void OnDisable() => RemoveAllListeners();
 
-    // --- Callbacks Sliders ---
+    void RemoveAllListeners()
+    {
+        if (masterSlider) masterSlider.onValueChanged.RemoveAllListeners();
+        if (musicSlider) musicSlider.onValueChanged.RemoveAllListeners();
+        if (sfxSlider) sfxSlider.onValueChanged.RemoveAllListeners();
+        if (muteToggle) muteToggle.onValueChanged.RemoveAllListeners();
+    }
+
+    // --- Callbacks ---
     public void OnMasterChanged(float v)
     {
-        if (v > 0.001f) _lastMaster = v;
-        if (muteToggle.isOn && v > 0.001f) muteToggle.isOn = false;
-
+        if (_loading) return;
         SimpleAudioManager.Instance?.SetMasterVolume01(v);
-        PlayerPrefs.SetFloat(KEY_MASTER, v); PlayerPrefs.Save();
+        PlayerPrefs.SetFloat(KEY_MASTER, Mathf.Clamp01(v));
+        PlayerPrefs.Save();
+
+        // Petit confort : si l’utilisateur bouge un slider alors que Mute est ON, on dé-mute
+        if (muteToggle && muteToggle.isOn && v > 0.001f)
+            muteToggle.SetIsOnWithoutNotify(false); OnMuteToggled(false);
     }
 
     public void OnMusicChanged(float v)
     {
-        if (v > 0.001f) _lastMusic = v;
-        if (muteToggle.isOn && v > 0.001f) muteToggle.isOn = false;
-
+        if (_loading) return;
         SimpleAudioManager.Instance?.SetMusicVolume01(v);
-        PlayerPrefs.SetFloat(KEY_MUSIC, v); PlayerPrefs.Save();
+        PlayerPrefs.SetFloat(KEY_MUSIC, Mathf.Clamp01(v));
+        PlayerPrefs.Save();
+
+        if (muteToggle && muteToggle.isOn && v > 0.001f)
+            muteToggle.SetIsOnWithoutNotify(false); OnMuteToggled(false);
     }
 
     public void OnSfxChanged(float v)
     {
-        if (v > 0.001f) _lastSfx = v;
-        if (muteToggle.isOn && v > 0.001f) muteToggle.isOn = false;
-
+        if (_loading) return;
         SimpleAudioManager.Instance?.SetSfxVolume01(v);
-        PlayerPrefs.SetFloat(KEY_SFX, v); PlayerPrefs.Save();
+        PlayerPrefs.SetFloat(KEY_SFX, Mathf.Clamp01(v));
+        PlayerPrefs.Save();
+
+        if (muteToggle && muteToggle.isOn && v > 0.001f)
+            muteToggle.SetIsOnWithoutNotify(false); OnMuteToggled(false);
     }
 
-    // --- Toggle Mute ---
     public void OnMuteToggled(bool mute)
     {
-        if (mute)
-        {
-            // Sauvegarde les valeurs actuelles et coupe
-            PlayerPrefs.SetFloat(KEY_MASTER, masterSlider.value);
-            PlayerPrefs.SetFloat(KEY_MUSIC, musicSlider.value);
-            PlayerPrefs.SetFloat(KEY_SFX, sfxSlider.value);
-            PlayerPrefs.SetInt(KEY_MUTE, 1);
-            PlayerPrefs.Save();
+        if (_loading) return;
 
-            SimpleAudioManager.Instance?.MuteAll(true);
+        // On ne touche PAS aux sliders visuels : mute agit via le Master dans le Mixer
+        SimpleAudioManager.Instance?.MuteAll(mute);
+        PlayerPrefs.SetInt(KEY_MUTE, mute ? 1 : 0);
+        PlayerPrefs.Save();
 
-            masterSlider.SetValueWithoutNotify(0f);
-            musicSlider.SetValueWithoutNotify(0f);
-            sfxSlider.SetValueWithoutNotify(0f);
-        }
-        else
-        {
-            // Restaure des niveaux “sains”
-            float m = Mathf.Max(PlayerPrefs.GetFloat(KEY_MASTER, _lastMaster), 0.05f);
-            float mu = Mathf.Max(PlayerPrefs.GetFloat(KEY_MUSIC, _lastMusic), 0.05f);
-            float sx = Mathf.Max(PlayerPrefs.GetFloat(KEY_SFX, _lastSfx), 0.05f);
-
-            SimpleAudioManager.Instance?.MuteAll(false);
-            SimpleAudioManager.Instance?.SetMasterVolume01(m);
-            SimpleAudioManager.Instance?.SetMusicVolume01(mu);
-            SimpleAudioManager.Instance?.SetSfxVolume01(sx);
-
-            masterSlider.SetValueWithoutNotify(m);
-            musicSlider.SetValueWithoutNotify(mu);
-            sfxSlider.SetValueWithoutNotify(sx);
-
-            PlayerPrefs.SetInt(KEY_MUTE, 0); PlayerPrefs.Save();
-        }
+        // (Option) Tu peux griser les sliders si mute :
+        // if (masterSlider) masterSlider.interactable = !mute;
+        // if (musicSlider)  musicSlider.interactable  = !mute;
+        // if (sfxSlider)    sfxSlider.interactable    = !mute;
     }
 }

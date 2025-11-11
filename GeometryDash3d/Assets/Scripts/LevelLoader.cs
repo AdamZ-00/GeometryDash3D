@@ -22,7 +22,10 @@ public class LevelLoader : MonoBehaviour
 
     void Start()
     {
-        int idx = Mathf.Clamp(PlayerPrefs.GetInt(KEY_SELECTED_LEVEL, 0), 0, Mathf.Max(0, levelPrefabs.Length - 1));
+        int idx = Mathf.Clamp(
+            PlayerPrefs.GetInt(KEY_SELECTED_LEVEL, 0),
+            0, Mathf.Max(0, levelPrefabs.Length - 1)
+        );
         LoadLevel(idx);
         TeleportPlayerToSpawn();
     }
@@ -74,23 +77,38 @@ public class LevelLoader : MonoBehaviour
         }
     }
 
-    // ---------- MUSIQUE : robuste au timing ----------
-    public void PlayCurrentLevelMusic()
+    // ---------- MUSIQUE : version crossfade ----------
+    public void PlayCurrentLevelMusic(float fade = 0.6f)
     {
         if (SimpleAudioManager.Instance == null) return;
 
         int idx = (GetCurrentIndex() >= 0)
             ? GetCurrentIndex()
-            : Mathf.Clamp(PlayerPrefs.GetInt(KEY_SELECTED_LEVEL, 0), 0, (musicPerLevel != null ? musicPerLevel.Length - 1 : 0));
+            : Mathf.Clamp(
+                PlayerPrefs.GetInt(KEY_SELECTED_LEVEL, 0),
+                0, (musicPerLevel != null && musicPerLevel.Length > 0) ? musicPerLevel.Length - 1 : 0
+              );
 
         AudioClip clip = null;
         if (musicPerLevel != null && idx >= 0 && idx < musicPerLevel.Length)
             clip = musicPerLevel[idx];
 
         if (clip != null)
-            SimpleAudioManager.Instance.PlayMusic(clip);   // <-- FORCE: stop -> set -> play
+            SimpleAudioManager.Instance.CrossfadeTo(clip, fade);  // << crossfade propre
         else
             Debug.LogWarning($"[LevelLoader] Pas de clip pour index {idx}. Assigne 'Music Per Level'.");
+    }
+
+    // “assureur” fin de frame (garde la signature que tu utilises déjà)
+    public void PlayCurrentLevelMusicEndOfFrame(MonoBehaviour runner, float fade = 0.6f)
+    {
+        if (!runner) return;
+        runner.StartCoroutine(_PlayMusicEOF());
+        System.Collections.IEnumerator _PlayMusicEOF()
+        {
+            yield return null;           // fin de frame
+            PlayCurrentLevelMusic(fade); // relance le crossfade
+        }
     }
 
     public void ReloadCurrentLevel()
@@ -101,14 +119,4 @@ public class LevelLoader : MonoBehaviour
     }
 
     public int GetCurrentIndex() => currentIndex;
-
-    public void PlayCurrentLevelMusicEndOfFrame(MonoBehaviour runner)
-    {
-        runner.StartCoroutine(_PlayMusicEOF());
-        System.Collections.IEnumerator _PlayMusicEOF()
-        {
-            yield return null; // fin de frame
-            PlayCurrentLevelMusic();
-        }
-    }
 }

@@ -90,4 +90,13 @@ public class LevelManagerLogic : MonoBehaviour
         Scene current = SceneManager.GetActiveScene();
         SceneManager.LoadScene(current.buildIndex);
     }
+
+    void OnEnable() { SceneManager.sceneLoaded += OnSceneLoaded; }
+    void OnDisable() { SceneManager.sceneLoaded -= OnSceneLoaded; }
+
+    void OnSceneLoaded(Scene s, LoadSceneMode m)
+    {
+        // relance la musique quand la nouvelle scène est prête
+        if (SimpleAudioManager.Instance) SimpleAudioManager.Instance.RestartMusic();
+    }
 }

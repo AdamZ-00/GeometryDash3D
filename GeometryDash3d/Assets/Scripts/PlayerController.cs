@@ -170,10 +170,9 @@ public class PlayerController : MonoBehaviour
         bool grounded = IsGrounded();
 
         // reset du flag quand on vient d'atterrir
-        if (grounded && !wasGrounded)
-            jumpedThisGround = false;
+        if (grounded && !wasGrounded) jumpedThisGround = false;
 
-        // condition de déclenchement : au sol + (appui ou maintien) + pas encore sauté pendant ce contact
+        // déclencheur : au sol + (appui ou maintien) + pas encore sauté pendant ce contact
         bool wantJumpNow =
             grounded &&
             !jumpedThisGround &&
@@ -182,10 +181,7 @@ public class PlayerController : MonoBehaviour
                 (holdToAutoJump && Input.GetButton("Jump"))
             );
 
-        if (wantJumpNow)
-        {
-            DoJump(); // saut de hauteur constante
-        }
+        if (wantJumpNow) DoJump();
 
         wasGrounded = grounded;
     }

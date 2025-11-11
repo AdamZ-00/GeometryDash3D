@@ -10,17 +10,19 @@ public class SimpleMenuController : MonoBehaviour
     public GameObject skinsPanel;
 
     [Header("NEW: Levels UI Panel")]
-    public GameObject levelSelectPanel;   // <-- assigne ton LevelSelectPanel
+    public GameObject levelSelectPanel;
 
     [Header("Options")]
     public bool openMenuOnStart = true;
 
     [Header("Gameplay UI")]
-    [SerializeField] private GameObject pauseButton; // bouton Pause (UI)
+    [SerializeField] private GameObject pauseButton;
+
+    [Header("Audio")]
+    [SerializeField] private AudioClip menuMusic;   // musique d’ambiance menu
 
     void Start()
     {
-        // Auto-play si un Restart vient d’avoir lieu
         if (PlayerPrefs.GetInt("auto_play_once", 0) == 1)
         {
             PlayerPrefs.SetInt("auto_play_once", 0);
@@ -35,15 +37,12 @@ public class SimpleMenuController : MonoBehaviour
 
     public void Play()
     {
-        // 1) Ferme tous les panneaux de MENU
+        // Ferme les panneaux
         HideAllPanels();
 
-        // 2) Si un PausePanel traînait actif, on le ferme aussi
+        // Ferme un éventuel PausePanel actif
         var pause = FindObjectOfType<PauseController>(true);
-        if (pause != null)
-        {
-            pause.Resume(); // remet TimeScale=1, curseur lock, et (si musique en pause) UnPause
-        }
+        if (pause != null) pause.Resume();
         else
         {
             Time.timeScale = 1f;
@@ -51,43 +50,28 @@ public class SimpleMenuController : MonoBehaviour
             Cursor.lockState = CursorLockMode.Locked;
         }
 
-        // 3) Bouton pause visible en jeu
         SetPauseButtonVisible(true);
 
-        // 4) Musique du niveau courant (FORCÉE)
+        // Crossfade vers la musique du niveau courant
         var loader = FindObjectOfType<LevelLoader>(true);
-        if (loader) loader.PlayCurrentLevelMusic();
+        if (loader) loader.PlayCurrentLevelMusic(0.6f);   // <-- crossfade propre
 
-        // 5) Assureur “fin de frame” (optionnel mais je le garde pour être béton)
-        if (loader) loader.PlayCurrentLevelMusicEndOfFrame(this);
-    }
-
-    IEnumerator EnsureLevelMusicPlaysAgain()
-    {
-        yield return null; // fin de frame
-        var loader = FindObjectOfType<LevelLoader>(true);
-        if (loader) loader.PlayCurrentLevelMusic();
-
-        // (option) une seconde tentative après 0.05s unscaled
-        float t = 0f;
-        while (t < 0.05f)
-        {
-            t += Time.unscaledDeltaTime;
-            yield return null;
-        }
-        loader = FindObjectOfType<LevelLoader>(true);
-        if (loader) loader.PlayCurrentLevelMusic();
+        // “Assureur” fin de frame
+        if (loader) loader.PlayCurrentLevelMusicEndOfFrame(this, 0.6f);
     }
 
     public void OpenMenu()
     {
         ShowMain();
         Time.timeScale = 0f;
-
         SetPauseButtonVisible(false);
 
         Cursor.visible = true;
         Cursor.lockState = CursorLockMode.None;
+
+        // Crossfade vers la musique du MENU
+        if (SimpleAudioManager.Instance && menuMusic)
+            SimpleAudioManager.Instance.CrossfadeTo(menuMusic, 0.6f);
     }
 
     public void ShowMain()
@@ -95,7 +79,7 @@ public class SimpleMenuController : MonoBehaviour
         if (mainPanel) mainPanel.SetActive(true);
         if (settingsPanel) settingsPanel.SetActive(false);
         if (skinsPanel) skinsPanel.SetActive(false);
-        if (levelSelectPanel) levelSelectPanel.SetActive(false); // cache Levels quand on revient au main
+        if (levelSelectPanel) levelSelectPanel.SetActive(false);
     }
 
     public void ShowSettings()
@@ -104,7 +88,6 @@ public class SimpleMenuController : MonoBehaviour
         if (settingsPanel) settingsPanel.SetActive(true);
         if (skinsPanel) skinsPanel.SetActive(false);
         if (levelSelectPanel) levelSelectPanel.SetActive(false);
-        // 👉 pas de musique ici (menu navigation only)
     }
 
     public void ShowSkins()
@@ -113,10 +96,8 @@ public class SimpleMenuController : MonoBehaviour
         if (settingsPanel) settingsPanel.SetActive(false);
         if (skinsPanel) skinsPanel.SetActive(true);
         if (levelSelectPanel) levelSelectPanel.SetActive(false);
-        // 👉 pas de musique ici (menu navigation only)
     }
 
-    // NEW: bouton "Levels" du MainPanel
     public void ShowLevels()
     {
         if (mainPanel) mainPanel.SetActive(false);
@@ -124,28 +105,22 @@ public class SimpleMenuController : MonoBehaviour
         if (skinsPanel) skinsPanel.SetActive(false);
         if (levelSelectPanel) levelSelectPanel.SetActive(true);
 
-        // remet le curseur visible (on est en menu)
         Cursor.visible = true;
         Cursor.lockState = CursorLockMode.None;
 
-        // notifie le LevelSelectUI qu'on ouvre (pour rafraîchir l'aperçu)
         var ui = levelSelectPanel ? levelSelectPanel.GetComponentInChildren<LevelSelectUI>(true) : null;
         if (ui) ui.RefreshFromPrefs();
-
-        // 👉 pas de musique ici (menu navigation only)
     }
 
     public void Back() => ShowMain();
 
     public void Quit()
     {
-        // 🎵 stop musique avant de quitter
-        if (SimpleAudioManager.Instance) SimpleAudioManager.Instance.StopMusic();
-
+        if (SimpleAudioManager.Instance) SimpleAudioManager.Instance.FadeOutMusic(0.4f);
 #if UNITY_EDITOR
-        UnityEditor.EditorApplication.isPlaying = false; // quitte le Play Mode
+        UnityEditor.EditorApplication.isPlaying = false;
 #else
-        Application.Quit(); // ferme l’app en build
+        Application.Quit();
 #endif
     }
 
@@ -162,18 +137,7 @@ public class SimpleMenuController : MonoBehaviour
         if (pauseButton) pauseButton.SetActive(visible);
     }
 
-    public void HidePauseButtonOnLevelFinish()
-    {
-        SetPauseButtonVisible(false);
-    }
+    public void HidePauseButtonOnLevelFinish() => SetPauseButtonVisible(false);
 
-    // Ferme tous les panneaux de menu (utilisé par PauseController.Resume)
-    public void CloseAllPanels()
-    {
-        if (mainPanel) mainPanel.SetActive(false);
-        if (settingsPanel) settingsPanel.SetActive(false);
-        if (skinsPanel) skinsPanel.SetActive(false);
-        if (levelSelectPanel) levelSelectPanel.SetActive(false);
-    }
-
+    public void CloseAllPanels() => HideAllPanels();
 }
