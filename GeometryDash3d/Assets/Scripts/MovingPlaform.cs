@@ -1,41 +1,51 @@
 using UnityEngine;
 
+[RequireComponent(typeof(Rigidbody))]
 public class MovingPlatform : MonoBehaviour
 {
     [Header("Mouvement")]
-    public Vector3 moveAxis = Vector3.right; // direction du mouvement (droite/gauche)
-    public float moveDistance = 4f;          // distance totale du déplacement
-    public float moveSpeed = 2f;             // vitesse du mouvement
+    public Vector3 moveAxis = Vector3.right; // direction du mouvement
+    public float moveDistance = 6f;          // amplitude du déplacement total
+    public float moveSpeed = 3f;             // vitesse du mouvement
 
     private Vector3 startPos;
+    private Rigidbody rb;
+    private Vector3 lastPosition;
 
     void Start()
     {
+        rb = GetComponent<Rigidbody>();
+        rb.isKinematic = true; // on contrôle le mouvement manuellement
+        rb.interpolation = RigidbodyInterpolation.Interpolate;
+
         startPos = transform.position;
+        lastPosition = startPos;
     }
 
-    void Update()
+    void FixedUpdate()
     {
-        // mouvement sinusoïdal : va-retour fluide entre les deux extrémités
+        // Mouvement sinusoïdal fluide
         float offset = Mathf.Sin(Time.time * moveSpeed) * moveDistance * 0.5f;
-        transform.position = startPos + moveAxis.normalized * offset;
+        Vector3 newPos = startPos + moveAxis.normalized * offset;
+
+        // Déplacement physique
+        rb.MovePosition(newPos);
+
+        lastPosition = newPos;
     }
 
-    void OnCollisionEnter(Collision other)
+    void OnCollisionStay(Collision other)
     {
         if (other.collider.CompareTag("Player"))
         {
-            other.transform.SetParent(transform); // le joueur devient enfant de la plateforme
+            Rigidbody playerRb = other.rigidbody;
+            if (playerRb != null)
+            {
+                // Déplacement de la plateforme entre deux frames
+                Vector3 platformDelta = transform.position - lastPosition;
+                // On ajoute ce déplacement à la vitesse du joueur (pour le "transporter")
+                playerRb.position += platformDelta;
+            }
         }
     }
-
-    void OnCollisionExit(Collision other)
-    {
-        if (other.collider.CompareTag("Player"))
-        {
-            other.transform.SetParent(null); // libère le joueur
-        }
-    }
-
 }
-
