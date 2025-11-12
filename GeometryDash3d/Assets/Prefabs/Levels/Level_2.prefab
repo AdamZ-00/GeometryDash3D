@@ -25009,6 +25009,30 @@ PrefabInstance:
       propertyPath: m_Name
       value: Platform
       objectReference: {fileID: 0}
+    - target: {fileID: 8047461955274491912, guid: 137d85f59a71ee14c8a3c67209edbc92, type: 3}
+      propertyPath: m_Size.x
+      value: 1.0373219
+      objectReference: {fileID: 0}
+    - target: {fileID: 8047461955274491912, guid: 137d85f59a71ee14c8a3c67209edbc92, type: 3}
+      propertyPath: m_Size.y
+      value: 1.4166535
+      objectReference: {fileID: 0}
+    - target: {fileID: 8047461955274491912, guid: 137d85f59a71ee14c8a3c67209edbc92, type: 3}
+      propertyPath: m_Size.z
+      value: 1.030986
+      objectReference: {fileID: 0}
+    - target: {fileID: 8047461955274491912, guid: 137d85f59a71ee14c8a3c67209edbc92, type: 3}
+      propertyPath: m_Center.x
+      value: -0.0069680484
+      objectReference: {fileID: 0}
+    - target: {fileID: 8047461955274491912, guid: 137d85f59a71ee14c8a3c67209edbc92, type: 3}
+      propertyPath: m_Center.y
+      value: 0.20832667
+      objectReference: {fileID: 0}
+    - target: {fileID: 8047461955274491912, guid: 137d85f59a71ee14c8a3c67209edbc92, type: 3}
+      propertyPath: m_Center.z
+      value: -0.002768095
+      objectReference: {fileID: 0}
     m_RemovedComponents: []
     m_RemovedGameObjects: []
     m_AddedGameObjects: []
@@ -26458,6 +26482,10 @@ PrefabInstance:
     - target: {fileID: 3495898751705411046, guid: f4152f518b71f9445afb433de1dfb596, type: 3}
       propertyPath: m_Name
       value: PortalIn (4)
+      objectReference: {fileID: 0}
+    - target: {fileID: 4646958430271975525, guid: f4152f518b71f9445afb433de1dfb596, type: 3}
+      propertyPath: targetPortals
+      value: 
       objectReference: {fileID: 0}
     m_RemovedComponents: []
     m_RemovedGameObjects: []
