@@ -4776,11 +4776,12 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::FollowCam
   target: {fileID: 438416590}
+  followX: 1
   height: 3
   distance: 6
-  followX: 1
-  lookAhead: 10
   smooth: 8
+  lockRotation: 1
+  fixedAngles: {x: 10, y: 0}
 --- !u!114 &963194230
 MonoBehaviour:
   m_ObjectHideFlags: 0

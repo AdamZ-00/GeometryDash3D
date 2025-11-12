@@ -5,30 +5,58 @@ public class FollowCam : MonoBehaviour
     [Header("Target")]
     public Transform target;
 
-    [Header("Placement")]
-    public float height   = 3f;   // hauteur constante de la caméra
-    public float distance = 6f;   // distance derrière le joueur (le long du +Z)
-    [Range(0f,1f)] public float followX = 1f; // 0 = ne suit pas en X, 1 = suit totalement
+    [Header("Placement (relatif au joueur, en repère MONDE)")]
+    [Tooltip("Décalage X = suivi latéral ; Y = hauteur au-dessus du joueur ; Z = distance derrière (valeur POSITIVE).")]
+    public float followX = 1f;     // 0 = ne suit pas en X, 1 = suit exactement le X du joueur
+    public float height = 3f;     // hauteur au-dessus du joueur (Y_cam = Y_player + height)
+    public float distance = 6f;    // derrière le joueur le long de l'axe Z du monde (pos_cam.z = z_player - distance)
 
-    [Header("Aiming")]
-    public float lookAhead = 10f; // vise un point en avant sur la piste
-    public float smooth = 8f;     // lissage du mouvement
+    [Header("Lissage")]
+    [Tooltip("Temps de convergence ~ 1/smooth (en s). Plus grand = plus réactif.")]
+    public float smooth = 8f;
 
-    private Vector3 vel; // utilisé par SmoothDamp
+    [Header("Rotation")]
+    [Tooltip("Si vrai : la caméra conserve des angles fixes et NE TOURNE PAS avec le joueur.")]
+    public bool lockRotation = true;
+    [Tooltip("Angles fixes quand lockRotation est vrai : (pitch, yaw). Roll = 0.")]
+    public Vector2 fixedAngles = new Vector2(10f, 0f); // pitch, yaw
+
+    private Vector3 vel; // pour SmoothDamp
 
     void LateUpdate()
     {
         if (!target) return;
 
-        // position désirée : hauteur FIXE, derrière le joueur, X facultatif
-        float desiredX = Mathf.Lerp(transform.position.x, target.position.x, followX);
-        Vector3 desiredPos = new Vector3(desiredX, height, target.position.z - distance);
+        // --- Position désirée (monde) ---
+        // X: suit plus ou moins le joueur
+        float desiredX = Mathf.Lerp(transform.position.x, target.position.x, Mathf.Clamp01(followX));
 
-        // lissage du déplacement
-        transform.position = Vector3.SmoothDamp(transform.position, desiredPos, ref vel, 1f / smooth);
+        // Y: garde une hauteur CONSTANTE relative au joueur
+        float desiredY = target.position.y + height;
 
-        // vise un point en avant, à HAUTEUR FIXE (ne pointe pas vers le Y du joueur)
-        Vector3 lookPoint = new Vector3(target.position.x, height, target.position.z + lookAhead);
-        transform.rotation = Quaternion.LookRotation(lookPoint - transform.position, Vector3.up);
+        // Z: garde une distance CONSTANTE derrière le joueur le long de +Z monde
+        float desiredZ = target.position.z - Mathf.Abs(distance);
+
+        Vector3 desiredPos = new Vector3(desiredX, desiredY, desiredZ);
+
+        // --- Lissage position ---
+        float followTime = 1f / Mathf.Max(0.01f, smooth); // durée de convergence
+        transform.position = Vector3.SmoothDamp(transform.position, desiredPos, ref vel, followTime);
+
+        // --- Rotation verrouillée (ne PAS regarder le joueur) ---
+        if (lockRotation)
+        {
+            transform.rotation = Quaternion.Euler(fixedAngles.x, fixedAngles.y, 0f);
+        }
+        // Sinon, si tu veux une rotation fixe différente à chaud, tu peux la changer ailleurs,
+        // mais on n'oriente JAMAIS vers le joueur ici.
     }
+
+#if UNITY_EDITOR
+    void OnValidate()
+    {
+        if (distance < 0f) distance = -distance; // distance toujours positive
+        if (smooth < 0.01f) smooth = 0.01f;
+    }
+#endif
 }
